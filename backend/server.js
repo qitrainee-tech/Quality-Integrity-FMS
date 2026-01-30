@@ -162,12 +162,12 @@ app.post('/api/signup', async (req, res) => {
 // Create User Route (Admin only)
 app.post('/api/create-user', async (req, res) => {
   try {
-    const { email, password, name, adminId } = req.body;
+    const { email, password, name, adminId, role, department, status } = req.body;
 
-    if (!email || !password || !name || !adminId) {
+    if (!email || !name || !adminId) {
       return res.status(400).json({ 
         success: false, 
-        message: 'All fields are required' 
+        message: 'Email, name and adminId are required' 
       });
     }
 
@@ -201,20 +201,36 @@ app.post('/api/create-user', async (req, res) => {
       });
     }
 
+    // If password not provided, generate a temporary one
+    const plainPassword = password || Math.random().toString(36).slice(-10) || 'TempPass123';
     // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(plainPassword, 10);
 
-    // Insert new user
-    await connection.query(
-      'INSERT INTO users (email, password, name, role) VALUES (?, ?, ?, "user")',
-      [email, hashedPassword, name]
+    // Determine role/department/status defaults
+    const newRole = role === 'Admin' ? 'admin' : 'user';
+    const newDepartment = department || 'General';
+    const newStatus = status || 'Active';
+
+    // Insert new user and get insertId
+    const [result] = await connection.query(
+      'INSERT INTO users (email, password, name, role, department, status) VALUES (?, ?, ?, ?, ?, ?)',
+      [email, hashedPassword, name, newRole, newDepartment, newStatus]
     );
 
     connection.release();
 
     res.status(201).json({ 
       success: true, 
-      message: 'User created successfully' 
+      message: 'User created successfully',
+      user: {
+        id: result.insertId,
+        email,
+        name,
+        role: newRole,
+        department: newDepartment,
+        status: newStatus,
+        tempPassword: password ? null : plainPassword
+      }
     });
 
   } catch (error) {
@@ -223,6 +239,66 @@ app.post('/api/create-user', async (req, res) => {
       success: false, 
       message: 'Server error. Please try again later.' 
     });
+  }
+});
+
+// Update User Route (Admin or self)
+app.put('/api/users/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { name, email, role, department, status, password } = req.body;
+    const adminId = req.query.adminId;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User ID required' });
+    }
+
+    const connection = await pool.getConnection();
+
+    // If adminId provided and is not the same as userId, verify admin
+    if (adminId && parseInt(adminId) !== parseInt(userId)) {
+      const [adminUser] = await connection.query(
+        'SELECT role FROM users WHERE id = ? AND role = "admin"',
+        [adminId]
+      );
+      if (adminUser.length === 0) {
+        connection.release();
+        return res.status(403).json({ success: false, message: 'Only admins can update other users' });
+      }
+    }
+
+    // Build update dynamically
+    const fields = [];
+    const params = [];
+    if (name) { fields.push('name = ?'); params.push(name); }
+    if (email) { fields.push('email = ?'); params.push(email); }
+    if (role) { fields.push('role = ?'); params.push(role === 'Admin' ? 'admin' : 'user'); }
+    if (department) { fields.push('department = ?'); params.push(department); }
+    if (status) { fields.push('status = ?'); params.push(status); }
+    if (password) {
+      const hashed = await bcrypt.hash(password, 10);
+      fields.push('password = ?'); params.push(hashed);
+    }
+
+    if (fields.length === 0) {
+      connection.release();
+      return res.status(400).json({ success: false, message: 'No fields to update' });
+    }
+
+    params.push(userId);
+    const sql = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+    const [result] = await connection.query(sql, params);
+
+    connection.release();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({ success: true, message: 'User updated successfully' });
+  } catch (error) {
+    console.error('Update User Error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -254,9 +330,10 @@ app.get('/api/users', async (req, res) => {
       });
     }
 
-    // Get all users
+
+    // Get all users (include department and status)
     const [users] = await connection.query(
-      'SELECT id, email, name, role, created_at FROM users'
+      'SELECT id, email, name, role, department, status, created_at FROM users'
     );
 
     connection.release();

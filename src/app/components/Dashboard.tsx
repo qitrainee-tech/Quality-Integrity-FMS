@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import logo from "../../assets/logo.png";
 import { 
@@ -35,7 +35,6 @@ import {
   ResponsiveContainer 
 } from 'recharts';
 import { User } from '../App';
-import { Admin } from './Admin';
 
 interface DashboardProps {
   user: User;
@@ -61,9 +60,12 @@ const mockFiles = [
 ];
 
 const initialUsers = [
-  { id: 1, name: 'Dr. Richardson', email: 'admin@pjg.com', role: 'Admin', department: 'Quality Improvement', status: 'Active' },
-  { id: 2, name: 'Nurse Sarah', email: 'sarah@pjg.com', role: 'User', department: 'Pediatrics', status: 'Active' },
-  { id: 3, name: 'Dr. Mike', email: 'mike@pjg.com', role: 'User', department: 'Cardiology', status: 'Offline' },
+  { id: 2, name: 'Admin', email: 'admin@pjghospital.com', role: 'Admin', department: 'Quality Improvement', status: 'Active' },
+  { id: 4, name: 'Admin', email: 'admin@gmail.com', role: 'User', department: 'General', status: 'Active' },
+  { id: 5, name: 'sample1', email: 'sample1@gmail.com', role: 'User', department: 'General', status: 'Active' },
+  { id: 6, name: 'sample2', email: 'sample2@gmail.com', role: 'User', department: 'General', status: 'Active' },
+  { id: 7, name: 'sample3', email: 'sample3@gmail.com', role: 'User', department: 'General', status: 'Active' },
+  { id: 8, name: 'sample4', email: 'sample4@gmail.com', role: 'User', department: 'General', status: 'Active' },
 ];
 
 const getFileIcon = (type: string) => {
@@ -76,7 +78,7 @@ const getFileIcon = (type: string) => {
 };
 
 export function Dashboard({ user, onLogout }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'upload' | 'files' | 'users' | 'adminPanel'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'upload' | 'files' | 'users'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const isAdmin = !!(user && user.role && user.role.toString().toLowerCase() === 'admin');
@@ -84,16 +86,101 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   // User Management State
   const [users, setUsers] = useState(initialUsers);
   const [showAddUserModal, setShowAddUserModal] = useState(false);
-  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'User', department: '' });
+  const [newUser, setNewUser] = useState({ name: '', email: '', password: '', role: 'User', department: 'General', status: 'Active' });
+  const [showEditUserModal, setShowEditUserModal] = useState(false);
+  const [editingUser, setEditingUser] = useState<any>(null);
+  const [editedUser, setEditedUser] = useState({ name: '', email: '', password: '', role: 'User', department: 'General', status: 'Active' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const usersPerPage = 10;
+  const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | null; message: string | null }>({ type: null, message: null });
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
-  const handleAddUser = (e: React.FormEvent) => {
+  const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    setUsers([...users, { ...newUser, id: users.length + 1, status: 'Active' }]);
-    setShowAddUserModal(false);
-    setNewUser({ name: '', email: '', role: 'User', department: '' });
-    alert('User added successfully!');
+    try {
+      const body = {
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        department: newUser.department,
+        status: newUser.status,
+        password: newUser.password || undefined,
+        adminId: user.id
+      } as any;
+
+      const res = await fetch(`${apiUrl}/api/create-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const data = await res.json();
+      if (data.success) {
+        // refresh list from server
+        await fetchUsers();
+        setShowAddUserModal(false);
+        setNewUser({ name: '', email: '', password: '', role: 'User', department: 'General', status: 'Active' });
+        setNotification({ type: 'success', message: data.message + (data.user && data.user.tempPassword ? `\nTemporary password: ${data.user.tempPassword}` : '') });
+      } else {
+        setNotification({ type: 'error', message: 'Create failed: ' + (data.message || 'Unknown error') });
+      }
+    } catch (err) {
+      console.error('Create user error:', err);
+      setNotification({ type: 'error', message: 'Unable to create user. See console for details.' });
+    }
+  };
+
+  const openEditModal = (user: any) => {
+    setEditingUser(user);
+    setEditedUser({ name: user.name, email: user.email, password: '', role: user.role, department: user.department, status: user.status });
+    setShowEditUserModal(true);
+  };
+
+  // Fetch users from backend when admin opens dashboard
+  const fetchUsers = async () => {
+    if (!isAdmin) return;
+    try {
+      const res = await fetch(`${apiUrl}/api/users?adminId=${user.id}`);
+      const data = await res.json();
+      if (data.success) {
+        setUsers(data.users);
+        // reset pagination if needed
+        setCurrentPage(1);
+      } else {
+        console.error('Failed to fetch users:', data.message);
+      }
+    } catch (err) {
+      console.error('Fetch users error:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchUsers();
+  }, [isAdmin]);
+
+  const handleEditUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await fetch(`${apiUrl}/api/users/${editingUser.id}?adminId=${user.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(editedUser)
+      });
+      const data = await res.json();
+      if (data.success) {
+        await fetchUsers();
+        setShowEditUserModal(false);
+        setEditingUser(null);
+        setEditedUser({ name: '', email: '', password: '', role: 'User', department: 'General', status: 'Active' });
+        setNotification({ type: 'success', message: 'User updated successfully!' });
+      } else {
+        setNotification({ type: 'error', message: 'Update failed: ' + (data.message || 'Unknown') });
+      }
+    } catch (err) {
+      console.error('Update user error:', err);
+      setNotification({ type: 'error', message: 'Unable to update user. See console for details.' });
+    }
   };
 
   const renderOverview = () => (
@@ -126,6 +213,21 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
           </div>
         ))}
       </div>
+
+      {notification.message && (
+        <div className={`m-4 p-4 rounded-lg border ${notification.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="text-sm">
+              {notification.message.split('\n').map((line, idx) => (
+                <div key={idx}>{line}</div>
+              ))}
+            </div>
+            <button onClick={() => setNotification({ type: null, message: null })} className="text-sm font-medium underline">
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
@@ -397,7 +499,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-sm text-gray-700">
-            {users.map((u) => (
+            {users.slice((currentPage - 1) * usersPerPage, currentPage * usersPerPage).map((u) => (
               <tr key={u.id} className="hover:bg-green-50/30 transition-colors group">
                 <td className="p-4">
                   <div className="flex items-center gap-3">
@@ -411,12 +513,17 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                   </div>
                 </td>
                 <td className="p-4">
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                    u.role === 'Admin' ? 'bg-purple-50 text-purple-700' : 'bg-gray-100 text-gray-700'
-                  }`}>
-                    {u.role === 'Admin' && <Shield className="w-3 h-3" />}
-                    {u.role}
-                  </span>
+                  {(() => {
+                    const isAdminRole = ((u.role || '').toString().toLowerCase() === 'admin');
+                    const displayRole = (u.role || '').toString();
+                    const label = displayRole ? (displayRole.charAt(0).toUpperCase() + displayRole.slice(1)) : '';
+                    return (
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${isAdminRole ? 'bg-green-400 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                        {isAdminRole && <Shield className="w-3 h-3 text-white" />}
+                        {label}
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="p-4 text-gray-600">{u.department}</td>
                 <td className="p-4">
@@ -427,21 +534,80 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                   </span>
                 </td>
                 <td className="p-4 text-right">
-                  <button 
-                    className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition-colors"
-                    onClick={() => {
-                      if(confirm('Are you sure you want to remove this user?')) {
-                        setUsers(users.filter(user => user.id !== u.id));
-                      }
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center justify-end gap-2">
+                    <button 
+                      className="p-1.5 hover:bg-blue-50 text-gray-400 hover:text-blue-600 rounded transition-colors"
+                      onClick={() => openEditModal(u)}
+                      title="Edit user"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                      </svg>
+                    </button>
+                    <button 
+                      className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition-colors"
+                      onClick={async () => {
+                        if (!confirm('Are you sure you want to remove this user?')) return;
+                        try {
+                          const res = await fetch(`${apiUrl}/api/users/${u.id}?adminId=${user.id}`, {
+                            method: 'DELETE'
+                          });
+                          const data = await res.json();
+                          if (data.success) {
+                            await fetchUsers();
+                            setNotification({ type: 'success', message: data.message });
+                          } else {
+                            setNotification({ type: 'error', message: 'Delete failed: ' + (data.message || 'Unknown') });
+                          }
+                        } catch (err) {
+                          console.error('Delete user error:', err);
+                          setNotification({ type: 'error', message: 'Unable to delete user. See console for details.' });
+                        }
+                      }}
+                      title="Delete user"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      </div>
+
+      {/* Pagination */}
+      <div className="p-4 border-t border-gray-100 flex items-center justify-between">
+        <span className="text-sm text-gray-600">
+          Showing {Math.min((currentPage - 1) * usersPerPage + 1, users.length)} to {Math.min(currentPage * usersPerPage, users.length)} of {users.length} users
+        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setCurrentPage(currentPage - 1)}
+            disabled={currentPage === 1}
+            className="p-2 hover:bg-gray-100 disabled:bg-gray-50 disabled:text-gray-300 disabled:cursor-not-allowed text-gray-600 rounded-lg transition-colors"
+            title="Previous page"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div className="flex items-center gap-1 px-3 py-2 bg-gray-50 rounded-lg">
+            <span className="text-sm font-medium text-gray-700">
+              {currentPage} / {Math.ceil(users.length / usersPerPage) || 1}
+            </span>
+          </div>
+          <button
+            onClick={() => setCurrentPage(currentPage + 1)}
+            disabled={currentPage === Math.ceil(users.length / usersPerPage)}
+            className="p-2 hover:bg-gray-100 disabled:bg-gray-50 disabled:text-gray-300 disabled:cursor-not-allowed text-gray-600 rounded-lg transition-colors"
+            title="Next page"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Add User Modal */}
@@ -481,6 +647,16 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                   placeholder="jane@pjg.com"
                 />
               </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Password (optional)</label>
+                <input
+                  type="password"
+                  value={newUser.password}
+                  onChange={e => setNewUser({...newUser, password: e.target.value})}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                  placeholder="Leave blank to auto-generate a temporary password"
+                />
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-gray-700">Role</label>
@@ -501,13 +677,25 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                     onChange={e => setNewUser({...newUser, department: e.target.value})}
                     className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
                   >
-                    <option value="">Select...</option>
+                    <option value="General">General</option>
                     <option value="Cardiology">Cardiology</option>
                     <option value="Pediatrics">Pediatrics</option>
                     <option value="Quality Improvement">Quality Improvement</option>
                     <option value="Administration">Administration</option>
                   </select>
                 </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Status</label>
+                <select 
+                  value={newUser.status}
+                  onChange={e => setNewUser({...newUser, status: e.target.value as 'Active' | 'Offline' | 'Inactive'})}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
+                >
+                  <option value="Active">Active</option>
+                  <option value="Offline">Offline</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
               </div>
               <div className="pt-4 flex gap-3">
                 <button 
@@ -522,6 +710,113 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                   className="flex-1 px-4 py-2 text-white bg-green-600 hover:bg-green-700 rounded-lg font-medium transition-colors"
                 >
                   Create Account
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Edit User Modal */}
+      {showEditUserModal && editingUser && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-xl"
+          >
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <h3 className="text-lg font-bold text-gray-900">Edit User</h3>
+              <button onClick={() => setShowEditUserModal(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleEditUser} className="p-6 space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Full Name</label>
+                <input 
+                  required
+                  type="text" 
+                  value={editedUser.name}
+                  onChange={e => setEditedUser({...editedUser, name: e.target.value})}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                  placeholder="Dr. Jane Doe"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Email Address</label>
+                <input 
+                  required
+                  type="email" 
+                  value={editedUser.email}
+                  onChange={e => setEditedUser({...editedUser, email: e.target.value})}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                  placeholder="jane@pjg.com"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Password (optional)</label>
+                <input
+                  type="password"
+                  value={editedUser.password}
+                  onChange={e => setEditedUser({...editedUser, password: e.target.value})}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                  placeholder="Leave blank to keep current password"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Role</label>
+                  <select 
+                    value={editedUser.role}
+                    onChange={e => setEditedUser({...editedUser, role: e.target.value})}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
+                  >
+                    <option value="User">User</option>
+                    <option value="Admin">Admin</option>
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-gray-700">Department</label>
+                  <select 
+                    required
+                    value={editedUser.department}
+                    onChange={e => setEditedUser({...editedUser, department: e.target.value})}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
+                  >
+                    <option value="General">General</option>
+                    <option value="Cardiology">Cardiology</option>
+                    <option value="Pediatrics">Pediatrics</option>
+                    <option value="Quality Improvement">Quality Improvement</option>
+                    <option value="Administration">Administration</option>
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-gray-700">Status</label>
+                <select 
+                  value={editedUser.status}
+                  onChange={e => setEditedUser({...editedUser, status: e.target.value as 'Active' | 'Offline' | 'Inactive'})}
+                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
+                >
+                  <option value="Active">Active</option>
+                  <option value="Offline">Offline</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+              <div className="pt-4 flex gap-3">
+                <button 
+                  type="button"
+                  onClick={() => setShowEditUserModal(false)}
+                  className="flex-1 px-4 py-2 text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit"
+                  className="flex-1 px-4 py-2 text-white bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition-colors"
+                >
+                  Save Changes
                 </button>
               </div>
             </form>
@@ -577,34 +872,17 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             {isAdmin && (
               <>
                 <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mt-8 mb-2">Admin</p>
-                <div className="space-y-2 px-4">
+                <div className="flex items-center gap-2 px-4">
                   <button
-                    onClick={() => { setActiveTab('adminPanel'); setIsSidebarOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
-                      activeTab === 'adminPanel' ? 'bg-green-50 text-green-700 shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    onClick={() => { setActiveTab('users'); setIsSidebarOpen(false); }}
+                    className={`flex-1 flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+                      activeTab === 'users' ? 'bg-green-50 text-green-700 shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
                     }`}
                   >
-                    <Shield className={`w-5 h-5 ${activeTab === 'adminPanel' ? 'text-green-600' : 'text-gray-400'}`} />
-                    Admin Panel
+                    <Users className={`w-5 h-5 ${activeTab === 'users' ? 'text-green-600' : 'text-gray-400'}`} />
+                    Account Management
                   </button>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => { setActiveTab('users'); setIsSidebarOpen(false); }}
-                      className={`flex-1 flex items-center gap-3 py-3 rounded-xl text-sm font-medium transition-all ${
-                        activeTab === 'users' ? 'bg-green-50 text-green-700 shadow-sm' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-                      }`}
-                    >
-                      <Users className={`w-5 h-5 ${activeTab === 'users' ? 'text-green-600' : 'text-gray-400'}`} />
-                      Account Management
-                    </button>
-                    <button
-                      onClick={() => { setActiveTab('users'); setShowAddUserModal(true); setIsSidebarOpen(false); }}
-                      title="Add User"
-                      className="p-2 rounded-md text-green-600 hover:bg-green-50"
-                    >
-                      <UserPlus className="w-4 h-4" />
-                    </button>
-                  </div>
+                  
                 </div>
               </>
             )}
@@ -657,7 +935,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
               <Menu className="w-6 h-6" />
             </button>
             <h2 className="text-lg font-semibold text-gray-800 capitalize">
-              {activeTab === 'overview' ? 'System Overview' : activeTab === 'upload' ? 'Upload Center' : activeTab === 'files' ? 'Digital Archive' : activeTab === 'adminPanel' ? 'Admin Panel' : 'Account Management'}
+              {activeTab === 'overview' ? 'System Overview' : activeTab === 'upload' ? 'Upload Center' : activeTab === 'files' ? 'Digital Archive' : 'Account Management'}
             </h2>
           </div>
           <div className="flex items-center gap-4">
@@ -676,7 +954,6 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
           {activeTab === 'overview' && renderOverview()}
           {activeTab === 'upload' && renderAddFile()}
           {activeTab === 'files' && renderFileManager()}
-          {activeTab === 'adminPanel' && <Admin onLogout={onLogout} />}
           {activeTab === 'users' && renderUserManagement()}
         </div>
       </main>

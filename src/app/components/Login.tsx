@@ -77,11 +77,11 @@ export function Login({ onLogin }: LoginProps) {
                 <img src={logo} alt="PJG Hospital" className="w-24 h-24 object-cover" />
               </div>
               <h1 className="text-3xl font-bold tracking-tight">
-                QUALITY IMPROVEMENT
+                QUALITY IMPROVEMENT-IPCPSU
               </h1>
               
             </div>
-              <h3>IPCPSU</h3>
+              
             <h2 className="text-5xl font-bold mb-6 leading-tight">
               Compassionate Care, <br />
               <span className="text-green-300">
@@ -214,7 +214,7 @@ export function Login({ onLogin }: LoginProps) {
                 {isLoading ? (
                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  "Sign In"
+                  "Log In"
                 )}
               </button>
             </form>
