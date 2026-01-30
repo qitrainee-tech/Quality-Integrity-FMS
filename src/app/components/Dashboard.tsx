@@ -91,7 +91,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   const [editingUser, setEditingUser] = useState<any>(null);
   const [editedUser, setEditedUser] = useState({ name: '', email: '', password: '', role: 'User', department: 'General', status: 'Active' });
   const [currentPage, setCurrentPage] = useState(1);
-  const usersPerPage = 10;
+  const usersPerPage = 5;
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | null; message: string | null }>({ type: null, message: null });
 
@@ -518,8 +518,8 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                     const displayRole = (u.role || '').toString();
                     const label = displayRole ? (displayRole.charAt(0).toUpperCase() + displayRole.slice(1)) : '';
                     return (
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${isAdminRole ? 'bg-green-400 text-white' : 'bg-gray-100 text-gray-700'}`}>
-                        {isAdminRole && <Shield className="w-3 h-3 text-white" />}
+                      <span className={`inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full text-xs font-medium ${isAdminRole ? 'bg-green-400 text-white' : 'bg-gray-100 text-gray-700'}`}>
+                        {/* {isAdminRole && <Shield className="w-3 h-3 text-white" />} */}
                         {label}
                       </span>
                     );
@@ -836,10 +836,11 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
       >
         <div className="h-full flex flex-col">
           <div className="p-6 flex items-center gap-3 border-b border-gray-100">
-            <div className="p-2 bg-green-600 rounded-lg text-white">
-              <Activity className="w-6 h-6" />
+            <div className="p-1 rounded-lg text-white">
+                {/* <Activity className="w-6 h-6 text-white" /> */}
+                <img src={logo} alt="PJG Hospital" className="w-12 h-12 object-cover" />
             </div>
-            <h1 className="text-xl font-bold text-gray-900 tracking-tight">PJG Hospital</h1>
+            <h1 className="text-xl font-bold text-gray-900 tracking-tight">QI-IPCPSU</h1>
             <button className="lg:hidden ml-auto" onClick={toggleSidebar}>
               <X className="w-5 h-5" />
             </button>

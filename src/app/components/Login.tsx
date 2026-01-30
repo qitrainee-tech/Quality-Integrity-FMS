@@ -77,20 +77,20 @@ export function Login({ onLogin }: LoginProps) {
                 <img src={logo} alt="PJG Hospital" className="w-24 h-24 object-cover" />
               </div>
               <h1 className="text-3xl font-bold tracking-tight">
-                QUALITY IMPROVEMENT-IPCPSU
+                Quality Improvement - IPCPSU
               </h1>
               
             </div>
               
             <h2 className="text-5xl font-bold mb-6 leading-tight">
-              Compassionate Care, <br />
+              Quality Care, <br />
               <span className="text-green-300">
-                Advanced Medicine.
+                Quality Service.
               </span>
             </h2>
             <p className="text-lg text-green-50/80 max-w-md leading-relaxed">
               Welcome to the Quality Improvement department's
-              personal File Management System
+              File Management System
             </p>
 
             <div className="mt-12 flex items-center gap-4 text-sm text-green-200/60">
