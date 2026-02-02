@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import logo from "../../assets/logo.png";
 import { 
@@ -94,6 +94,17 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   const usersPerPage = 5;
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | null; message: string | null }>({ type: null, message: null });
+
+  // Upload form state
+  const [docName, setDocName] = useState('');
+  const [categoryDoc, setCategoryDoc] = useState('');
+  const [departmentDoc, setDepartmentDoc] = useState('');
+  const [accessLevel, setAccessLevel] = useState('Confidential (Restricted)');
+  const [descriptionDoc, setDescriptionDoc] = useState('');
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // 200MB per file
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
@@ -307,13 +318,13 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Document Name</label>
-            <input type="text" className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all" placeholder="e.g. Patient Report 2023" />
+            <input value={docName} onChange={(e) => setDocName(e.target.value)} type="text" className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all" placeholder="e.g. Patient Report 2023" />
           </div>
           
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Category</label>
-            <select className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
-              <option>Select Category</option>
+            <select value={categoryDoc} onChange={(e) => setCategoryDoc(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
+              <option value="">Select Category</option>
               <option>Lab Reports</option>
               <option>Radiology/Imaging</option>
               <option>Prescriptions</option>
@@ -324,8 +335,8 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Department</label>
-            <select className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
-              <option>Select Department</option>
+            <select value={departmentDoc} onChange={(e) => setDepartmentDoc(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
+              <option value="">Select Department</option>
               <option>General</option>
               <option>Cardiology</option>
               <option>Neurology</option>
@@ -334,27 +345,55 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             </select>
           </div>
 
-          <div className="space-y-2">
+          {/* <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Access Level</label>
-            <select className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
+            <select value={accessLevel} onChange={(e) => setAccessLevel(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
               <option>Confidential (Restricted)</option>
               <option>Internal Staff Only</option>
               <option>Public</option>
             </select>
-          </div>
+          </div> */}
 
           <div className="md:col-span-2 space-y-2">
             <label className="text-sm font-medium text-gray-700">Description / Tags</label>
-            <textarea className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all h-24 resize-none" placeholder="Add relevant tags or a brief description..." />
+            <textarea value={descriptionDoc} onChange={(e) => setDescriptionDoc(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all h-24 resize-none" placeholder="Add relevant tags or a brief description..." />
           </div>
         </div>
 
-        <div className="border-2 border-dashed border-gray-200 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:border-green-400 hover:bg-green-50/10 transition-colors cursor-pointer group bg-gray-50/30">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
+          className="border-2 border-dashed border-gray-200 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:border-green-400 hover:bg-green-50/10 transition-colors group bg-gray-50/30 cursor-pointer"
+        >
           <div className="p-4 bg-green-50 text-green-600 rounded-full mb-4 group-hover:scale-110 transition-transform shadow-sm">
             <Upload className="w-8 h-8" />
           </div>
           <h3 className="text-base font-semibold text-gray-900">Click to upload or drag and drop</h3>
-          <p className="text-sm text-gray-500 mt-2 max-w-xs">Supported formats: PDF, JPG, PNG, DICOM, DOCX, XLSX (Max 50MB)</p>
+          <p className="text-sm text-gray-500 mt-2 max-w-xs">Supported formats: PDF, JPG, PNG, DICOM, DOCX, XLSX (Max 200MB per file)</p>
+          <input 
+            ref={fileInputRef} 
+            type="file" 
+            multiple
+            accept="*/*" 
+            onChange={(e) => {
+              const files = e.target.files ? Array.from(e.target.files) : [];
+              setSelectedFiles(files);
+            }} 
+            className="mt-4 hidden" 
+          />
+          {selectedFiles.length > 0 && (
+            <div className="text-sm text-gray-600 mt-4 w-full max-h-32 overflow-y-auto">
+              <p className="font-medium mb-2">Selected files ({selectedFiles.length}):</p>
+              {selectedFiles.map((file, idx) => (
+                <div key={idx} className="flex justify-between items-center text-xs text-gray-500 mb-1">
+                  <span>{file.name}</span>
+                  <span className="text-gray-400">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-3 mt-8">
@@ -363,13 +402,55 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
           </button>
           <button 
             className="px-6 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-lg shadow-green-600/20 transition-all flex items-center gap-2"
-            onClick={() => {
-              alert("File uploaded successfully!");
-              setActiveTab('files');
+            onClick={async () => {
+              if (selectedFiles.length === 0) { setNotification({ type: 'error', message: 'Please select at least one file to upload.' }); return; }
+              
+              // Check file sizes
+              const oversizedFiles = selectedFiles.filter(f => f.size > MAX_UPLOAD_BYTES);
+              if (oversizedFiles.length > 0) { 
+                setNotification({ type: 'error', message: `${oversizedFiles.length} file(s) exceed 200MB limit.` }); 
+                return; 
+              }
+              
+              setUploading(true);
+              try {
+                const form = new FormData();
+                
+                // Add all selected files with the field name 'document'
+                selectedFiles.forEach((file) => {
+                  form.append('document', file as Blob);
+                });
+                
+                form.append('document_name', docName);
+                form.append('category', categoryDoc);
+                form.append('department', departmentDoc);
+                form.append('description', descriptionDoc);
+                form.append('uploaded_by', String(user.id));
+
+                const res = await fetch(`${apiUrl}/api/documents/upload`, {
+                  method: 'POST',
+                  body: form
+                });
+                const data = await res.json();
+                if (data.success) {
+                  setNotification({ type: 'success', message: data.message || 'Upload successful' });
+                  // clear form
+                  setDocName(''); setCategoryDoc(''); setDepartmentDoc(''); setDescriptionDoc(''); setSelectedFiles([]);
+                  setActiveTab('files');
+                } else {
+                  setNotification({ type: 'error', message: 'Upload failed: ' + (data.message || 'Unknown error') });
+                }
+              } catch (err) {
+                console.error('Upload error:', err);
+                setNotification({ type: 'error', message: 'Upload failed. See console for details.' });
+              } finally {
+                setUploading(false);
+              }
             }}
+            disabled={uploading}
           >
             <Upload className="w-4 h-4" />
-            Upload File
+            {uploading ? 'Uploading...' : `Upload ${selectedFiles.length > 0 ? selectedFiles.length : ''} File(s)`}
           </button>
         </div>
       </div>

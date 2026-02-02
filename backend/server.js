@@ -4,6 +4,7 @@ import bodyParser from 'body-parser';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -13,6 +14,10 @@ const PORT = process.env.PORT || 3001;
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
+
+// Multer (memory storage) for file uploads (store in DB as BLOB)
+const storage = multer.memoryStorage();
+const upload = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } }); // 200MB limit
 
 // MySQL Connection Pool
 const pool = mysql.createPool({
@@ -420,6 +425,208 @@ app.delete('/api/users/:userId', async (req, res) => {
       success: false, 
       message: 'Server error: ' + error.message 
     });
+  }
+});
+
+// Document upload route (multiple files in one row)
+app.post('/api/documents/upload', upload.array('document'), async (req, res) => {
+  try {
+    const { document_name, category, department, description, uploaded_by } = req.body;
+
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ success: false, message: 'No files uploaded' });
+    }
+
+    const connection = await pool.getConnection();
+
+    try {
+      // Fetch username once
+      let uploadedByName = null;
+      if (uploaded_by) {
+        const userId = parseInt(uploaded_by, 10);
+        const [userRows] = await connection.query(
+          'SELECT name FROM users WHERE id = ?',
+          [userId]
+        );
+        if (userRows.length > 0) {
+          uploadedByName = userRows[0].name;
+        }
+      }
+
+      // Prepare file metadata and aggregate data
+      const filesData = [];
+      let totalSize = 0;
+      const mimeTypes = [];
+
+      for (const file of req.files) {
+        console.log('Processing file:', file.originalname, 'Size:', file.size, 'Type:', file.mimetype);
+        
+        // Convert buffer to base64 for JSON serialization
+        const base64Data = file.buffer.toString('base64');
+        
+        filesData.push({
+          name: file.originalname,
+          type: file.mimetype,
+          size: file.size,
+          data: base64Data
+        });
+        
+        totalSize += file.size;
+        
+        if (!mimeTypes.includes(file.mimetype)) {
+          mimeTypes.push(file.mimetype);
+        }
+      }
+
+      // Serialize all file data as JSON
+      const filesJson = JSON.stringify(filesData);
+      const typesJson = JSON.stringify(mimeTypes);
+
+      console.log('Aggregated upload:', {
+        document_name,
+        category,
+        department,
+        description,
+        totalSize,
+        fileCount: req.files.length,
+        mimeTypes,
+        uploadedBy: uploadedByName
+      });
+
+      // Single insert with all files in one row
+      const sql = 'INSERT INTO documents_tbl (document_name, category, department, description, document_size, document_type, uploaded_by, document_blob) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+      const params = [
+        document_name || null,
+        category || null,
+        department || null,
+        description || null,
+        totalSize,
+        typesJson,
+        uploadedByName,
+        filesJson
+      ];
+
+      const [result] = await connection.query(sql, params);
+      connection.release();
+
+      console.log('Single insert result:', result.insertId, 'Files:', req.files.length);
+      res.status(201).json({ 
+        success: true, 
+        message: `${req.files.length} file(s) uploaded successfully in one record`, 
+        id: result.insertId,
+        fileCount: req.files.length
+      });
+    } catch (err) {
+      connection.release();
+      console.error('DB insert error:', err && err.message ? err.message : err);
+      res.status(500).json({ success: false, message: 'Database error while saving documents', error: err && err.message ? err.message : String(err) });
+    }
+  } catch (error) {
+    console.error('Upload Error:', error);
+    res.status(500).json({ success: false, message: 'Server error during upload' });
+  }
+});
+
+// List documents (metadata only)
+app.get('/api/documents', async (req, res) => {
+  try {
+    const connection = await pool.getConnection();
+    const [rows] = await connection.query(
+      'SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at FROM documents_tbl ORDER BY uploaded_at DESC'
+    );
+    connection.release();
+    res.json({ success: true, documents: rows });
+  } catch (err) {
+    console.error('List documents error:', err);
+    res.status(500).json({ success: false, message: 'Unable to list documents' });
+  }
+});
+
+// Download document blob by id (returns file list or individual file)
+app.get('/api/documents/:id/download', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { fileIndex } = req.query; // optional: specify which file to download (0-based)
+    
+    const connection = await pool.getConnection();
+    const [rows] = await connection.query(
+      'SELECT document_name, document_type, document_size, document_blob FROM documents_tbl WHERE id = ?',
+      [id]
+    );
+    connection.release();
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+
+    const doc = rows[0];
+    const blobData = doc.document_blob;
+    
+    if (!blobData) {
+      return res.status(404).json({ success: false, message: 'Document content not found' });
+    }
+
+    let filesData;
+    try {
+      // Parse JSON blob to get files array
+      const blobStr = blobData.toString('utf8');
+      filesData = JSON.parse(blobStr);
+    } catch (e) {
+      // Fallback: treat as legacy binary blob
+      console.log('Could not parse as JSON, treating as binary blob');
+      const mime = doc.document_type || 'application/octet-stream';
+      const filename = doc.document_name || `document-${id}`;
+      const size = doc.document_size || blobData.length;
+
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Length', size);
+      res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/\"/g, '')}"`);
+      return res.send(blobData);
+    }
+
+    // If fileIndex is specified, download single file
+    if (fileIndex !== undefined) {
+      const idx = parseInt(fileIndex, 10);
+      if (!Array.isArray(filesData) || !filesData[idx]) {
+        return res.status(404).json({ success: false, message: 'File not found in record' });
+      }
+
+      const file = filesData[idx];
+      const buffer = Buffer.from(file.data, 'base64');
+
+      res.setHeader('Content-Type', file.type || 'application/octet-stream');
+      res.setHeader('Content-Length', buffer.length);
+      res.setHeader('Content-Disposition', `attachment; filename="${file.name.replace(/\"/g, '')}"`);
+      return res.send(buffer);
+    }
+
+    // If no fileIndex, return list of files in record
+    if (Array.isArray(filesData)) {
+      const fileList = filesData.map((f, idx) => ({
+        index: idx,
+        name: f.name,
+        type: f.type,
+        size: f.size
+      }));
+      return res.json({ 
+        success: true, 
+        documentId: id,
+        documentName: doc.document_name,
+        totalSize: doc.document_size,
+        files: fileList 
+      });
+    }
+
+    // Fallback: return as single blob
+    const mime = (Array.isArray(doc.document_type) ? doc.document_type[0] : doc.document_type) || 'application/octet-stream';
+    const filename = doc.document_name || `document-${id}`;
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Content-Length', doc.document_size || blobData.length);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename.replace(/\"/g, '')}"`);
+    return res.send(blobData);
+  } catch (err) {
+    console.error('Download document error:', err);
+    res.status(500).json({ success: false, message: 'Unable to download document' });
   }
 });
 
