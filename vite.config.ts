@@ -10,7 +10,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
   ],
-  base: process.env.BASE_PATH || '/Quality-Integrity-FMS/tree/master',
+  base: process.env.VITE_BASE_PATH || '/Quality-Integrity-FMS/tree/master',
   resolve: {
     alias: {
       // Alias @ to the src directory
