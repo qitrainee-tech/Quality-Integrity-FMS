@@ -119,8 +119,8 @@ export function Login({ onLogin }: LoginProps) {
             transition={{ duration: 0.5 }}
           >
             <div className="text-center mb-10">
-              <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-green-50 text-green-600 mb-6 lg:hidden">
-                <Activity className="w-8 h-8" />
+              <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-green-50 text-green-600 mb-6 lg:hidden">
+                <img src={logo} alt="PJG Hospital Logo" className="w-20 h-20" />
               </div>
               <h2 className="text-3xl font-bold text-gray-900">
                 Welcome Back

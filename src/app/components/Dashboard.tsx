@@ -99,11 +99,13 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   const [docName, setDocName] = useState('');
   const [categoryDoc, setCategoryDoc] = useState('');
   const [departmentDoc, setDepartmentDoc] = useState('');
-  const [accessLevel, setAccessLevel] = useState('Confidential (Restricted)');
+  const [accessLevel, setAccessLevel] = useState('Admin Only');
   const [descriptionDoc, setDescriptionDoc] = useState('');
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
-  const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // 200MB per file
+  const [uploadController, setUploadController] = useState<AbortController | null>(null);
+  const [uploadErrors, setUploadErrors] = useState<{ docName?: string; category?: string; department?: string }>({});
+  const MAX_UPLOAD_BYTES = 1000 * 1024 * 1024; // 1GB per upload
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Account management: search and filters
@@ -121,6 +123,61 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     .filter(u => userFilterRole ? ((u.role || '').toString().toLowerCase() === userFilterRole.toLowerCase()) : true);
 
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
+
+  // Documents state
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [showFilesModal, setShowFilesModal] = useState(false);
+  const [currentFilesList, setCurrentFilesList] = useState<any[]>([]);
+  const [currentDocumentName, setCurrentDocumentName] = useState('');
+  const [currentDocumentDescription, setCurrentDocumentDescription] = useState('');
+  const [currentUploadedBy, setCurrentUploadedBy] = useState('');
+  // File Manager pagination
+  const [filePage, setFilePage] = useState(1);
+  const [filesPerPage, setFilesPerPage] = useState(10);
+  // File Manager filters
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filterCategory, setFilterCategory] = useState('');
+  const [filterDepartment, setFilterDepartment] = useState('');
+  const [filterAccessLevel, setFilterAccessLevel] = useState('');
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/documents?userId=${user.id}`);
+      const data = await res.json();
+      if (data.success) {
+        setDocuments(data.documents || []);
+      } else {
+        console.error('Failed to fetch documents:', data.message);
+      }
+    } catch (err) {
+      console.error('Fetch documents error:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'files') fetchDocuments();
+  }, [activeTab]);
+
+  const viewFiles = async (docId: number, docName: string, description: string = '') => {
+    try {
+      const res = await fetch(`${apiUrl}/api/documents/${docId}/download`);
+      const data = await res.json();
+      if (data.success && data.files) {
+        // attach document id for download links
+        const mapped = data.files.map((f: any) => ({ ...f, documentId: docId }));
+        setCurrentFilesList(mapped);
+        setCurrentDocumentName(docName || 'Files');
+        setCurrentDocumentDescription(description || '');
+        setCurrentUploadedBy(data.uploadedBy || '');
+        setShowFilesModal(true);
+      } else {
+        setNotification({ type: 'error', message: data.message || 'Unable to load files' });
+      }
+    } catch (err) {
+      console.error('View files error:', err);
+      setNotification({ type: 'error', message: 'Unable to load files. See console.' });
+    }
+  };
 
   const handleAddUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,7 +265,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     }
   };
 
-  // ...existing code...
+
 
 
   
@@ -243,20 +300,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
         ))}
       </div>
 
-      {notification.message && (
-        <div className={`m-4 p-4 rounded-lg border ${notification.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-          <div className="flex items-start justify-between gap-4">
-            <div className="text-sm">
-              {notification.message.split('\n').map((line, idx) => (
-                <div key={idx}>{line}</div>
-              ))}
-            </div>
-            <button onClick={() => setNotification({ type: null, message: null })} className="text-sm font-medium underline">
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
+      
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
@@ -336,32 +380,51 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Document Name</label>
-            <input value={docName} onChange={(e) => setDocName(e.target.value)} type="text" className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all" placeholder="e.g. Patient Report 2023" />
+            <input
+              value={docName}
+              onChange={(e) => { setDocName(e.target.value); if (uploadErrors.docName) setUploadErrors(prev => ({ ...prev, docName: undefined })); }}
+              type="text"
+              className={`w-full px-4 py-2 rounded-lg border ${uploadErrors.docName ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:border-green-500 focus:ring-green-500/20'} outline-none transition-all`}
+              placeholder="e.g. Patient Report 2023"
+            />
+            {uploadErrors.docName && <p className="text-xs text-red-600 mt-1">{uploadErrors.docName}</p>}
           </div>
           
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Category</label>
-            <select value={categoryDoc} onChange={(e) => setCategoryDoc(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
+            <select
+              value={categoryDoc}
+              onChange={(e) => { setCategoryDoc(e.target.value); if (uploadErrors.category) setUploadErrors(prev => ({ ...prev, category: undefined })); }}
+              className={`w-full px-4 py-2 rounded-lg border ${uploadErrors.category ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:border-green-500 focus:ring-green-500/20'} outline-none transition-all bg-white`}
+            >
               <option value="">Select Category</option>
-              <option>Lab Reports</option>
-              <option>Radiology/Imaging</option>
-              <option>Prescriptions</option>
-              <option>Administrative</option>
-              <option>Legal/Consent</option>
+              <option>CIP</option>
+              <option>CAR</option>
+              <option>DCN</option>
+              <option>IQA</option>
+              <option>Audits</option>
             </select>
+            {uploadErrors.category && <p className="text-xs text-red-600 mt-1">{uploadErrors.category}</p>}
           </div>
 
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-700">Department</label>
-            <select value={departmentDoc} onChange={(e) => setDepartmentDoc(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
-              <option value="">Select Department</option>
-              <option>General</option>
-              <option>Cardiology</option>
-              <option>Neurology</option>
-              <option>Pediatrics</option>
-              <option>Emergency</option>
-            </select>
-          </div>
+          {isAdmin && (
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Department</label>
+              <select
+                value={departmentDoc}
+                onChange={(e) => { setDepartmentDoc(e.target.value); if (uploadErrors.department) setUploadErrors(prev => ({ ...prev, department: undefined })); }}
+                className={`w-full px-4 py-2 rounded-lg border ${uploadErrors.department ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:border-green-500 focus:ring-green-500/20'} outline-none transition-all bg-white`}
+              >
+                <option value="">Select Department</option>
+                <option>General</option>
+                <option>Cardiology</option>
+                <option>Neurology</option>
+                <option>Pediatrics</option>
+                <option>Emergency</option>
+              </select>
+              {uploadErrors.department && <p className="text-xs text-red-600 mt-1">{uploadErrors.department}</p>}
+            </div>
+          )}
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Access Level</label>
@@ -388,7 +451,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             <Upload className="w-8 h-8" />
           </div>
           <h3 className="text-base font-semibold text-gray-900">Click to upload or drag and drop</h3>
-          <p className="text-sm text-gray-500 mt-2 max-w-xs">Supported formats: PDF, JPG, PNG, DICOM, DOCX, XLSX (Max 200MB per file)</p>
+          <p className="text-sm text-gray-500 mt-2 max-w-xs">Supported formats: PDF, JPG, PNG, DICOM, DOCX, XLSX (Max 1GB per upload)</p>
           <input 
             ref={fileInputRef} 
             type="file" 
@@ -401,12 +464,22 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             className="mt-4 hidden" 
           />
           {selectedFiles.length > 0 && (
-            <div className="text-sm text-gray-600 mt-4 w-full max-h-32 overflow-y-auto">
+            <div className="text-sm text-gray-600 mt-4 w-full max-h-48 overflow-y-auto">
               <p className="font-medium mb-2">Selected files ({selectedFiles.length}):</p>
               {selectedFiles.map((file, idx) => (
                 <div key={idx} className="flex justify-between items-center text-xs text-gray-500 mb-1">
-                  <span>{file.name}</span>
-                  <span className="text-gray-400">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+                  <div className="flex items-center gap-3">
+                    <span>{file.name}</span>
+                    <span className="text-gray-400">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); e.preventDefault(); setSelectedFiles(prev => prev.filter((_, i) => i !== idx)); }}
+                    className="text-xs text-red-600 hover:underline px-2 py-1 rounded"
+                    title="Remove file"
+                  >
+                    Remove
+                  </button>
                 </div>
               ))}
             </div>
@@ -414,21 +487,53 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
         </div>
 
         <div className="flex justify-end gap-3 mt-8">
-          <button className="px-6 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+          <button
+            className="px-6 py-2.5 text-sm font-medium text-gray-600 hover:text-gray-900 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+            onClick={() => {
+              // If an upload is in progress, abort it
+              if (uploading && uploadController) {
+                uploadController.abort();
+              }
+              // Reset form state
+              setUploading(false);
+              setUploadController(null);
+              setSelectedFiles([]);
+              setDocName('');
+              setCategoryDoc('');
+              setDepartmentDoc('');
+              setDescriptionDoc('');
+              setAccessLevel('Admin Only');
+              setUploadErrors({});
+            }}
+          >
             Cancel
           </button>
           <button 
             className="px-6 py-2.5 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg shadow-lg shadow-green-600/20 transition-all flex items-center gap-2"
             onClick={async () => {
+                // Validate required fields and set per-field errors
+                const errors: { docName?: string; category?: string; department?: string } = {};
+                if (!docName.trim()) errors.docName = 'Document name is required';
+                if (!categoryDoc) errors.category = 'Please select a category';
+                if (isAdmin && !departmentDoc) errors.department = 'Please select a department';
+                if (Object.keys(errors).length > 0) {
+                  setUploadErrors(errors);
+                  setNotification({ type: 'error', message: 'Please complete the highlighted fields before uploading.' });
+                  return;
+                }
+
               if (selectedFiles.length === 0) { setNotification({ type: 'error', message: 'Please select at least one file to upload.' }); return; }
-              
+
               // Check file sizes
               const oversizedFiles = selectedFiles.filter(f => f.size > MAX_UPLOAD_BYTES);
               if (oversizedFiles.length > 0) { 
-                setNotification({ type: 'error', message: `${oversizedFiles.length} file(s) exceed 200MB limit.` }); 
+                setNotification({ type: 'error', message: `${oversizedFiles.length} file(s) exceed 1GB limit.` }); 
                 return; 
               }
-              
+
+              // create an AbortController so the upload can be cancelled
+              const controller = new AbortController();
+              setUploadController(controller);
               setUploading(true);
               try {
                 const form = new FormData();
@@ -440,28 +545,36 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                 
                 form.append('document_name', docName);
                 form.append('category', categoryDoc);
-                form.append('department', departmentDoc);
+                form.append('department', isAdmin ? departmentDoc : (user.department || 'General'));
                 form.append('description', descriptionDoc);
                 form.append('uploaded_by', String(user.id));
+                form.append('access_level', accessLevel);
 
                 const res = await fetch(`${apiUrl}/api/documents/upload`, {
                   method: 'POST',
-                  body: form
+                  body: form,
+                  signal: controller.signal
                 });
                 const data = await res.json();
                 if (data.success) {
                   setNotification({ type: 'success', message: data.message || 'Upload successful' });
                   // clear form
                   setDocName(''); setCategoryDoc(''); setDepartmentDoc(''); setDescriptionDoc(''); setSelectedFiles([]);
+                  setAccessLevel('Admin Only');
                   setActiveTab('files');
                 } else {
                   setNotification({ type: 'error', message: 'Upload failed: ' + (data.message || 'Unknown error') });
                 }
               } catch (err) {
-                console.error('Upload error:', err);
-                setNotification({ type: 'error', message: 'Upload failed. See console for details.' });
+                if ((err as any).name === 'AbortError') {
+                  setNotification({ type: 'error', message: 'Upload cancelled.' });
+                } else {
+                  console.error('Upload error:', err);
+                  setNotification({ type: 'error', message: 'Upload failed. See console for details.' });
+                }
               } finally {
                 setUploading(false);
+                setUploadController(null);
               }
             }}
             disabled={uploading}
@@ -474,7 +587,30 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     </motion.div>
   );
 
-  const renderFileManager = () => (
+  const renderFileManager = () => {
+    let filteredDocuments = documents.filter(d => (d.document_name || '').toLowerCase().includes(searchTerm.toLowerCase()));
+    
+    // Apply category filter
+    if (filterCategory) {
+      filteredDocuments = filteredDocuments.filter(d => (d.category || '') === filterCategory);
+    }
+    
+    // Apply department filter
+    if (filterDepartment) {
+      filteredDocuments = filteredDocuments.filter(d => (d.department || '') === filterDepartment);
+    }
+    
+    // Apply access_level filter (only visible to admin)
+    if (filterAccessLevel && isAdmin) {
+      filteredDocuments = filteredDocuments.filter(d => (d.access_level || '') === filterAccessLevel);
+    }
+    
+    const totalDocs = filteredDocuments.length;
+    const startIndex = totalDocs === 0 ? 0 : (filePage - 1) * filesPerPage + 1;
+    const endIndex = Math.min(filePage * filesPerPage, totalDocs);
+    const displayedDocuments = filteredDocuments.slice((filePage - 1) * filesPerPage, filePage * filesPerPage);
+
+    return (
     <motion.div 
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -487,7 +623,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
           <p className="text-sm text-gray-500 mt-1">Browse and manage hospital documents</p>
         </div>
         <div className="flex items-center gap-3 w-full sm:w-auto">
-          <button className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 text-sm">
+          <button onClick={() => setShowFilterModal(true)} className="flex items-center gap-2 px-3 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-600 text-sm">
             <Filter className="w-4 h-4" />
             Filter
           </button>
@@ -497,10 +633,15 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
               type="text" 
               placeholder="Search files..." 
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => { setSearchTerm(e.target.value); setFilePage(1); }}
               className="w-full sm:w-64 pl-9 pr-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all text-sm"
             />
           </div>
+          <select value={filesPerPage} onChange={(e) => { setFilesPerPage(Number(e.target.value)); setFilePage(1); }} className="ml-2 px-2 py-1 rounded border border-gray-200 bg-white text-sm">
+            <option value={5}>5 / page</option>
+            <option value={10}>10 / page</option>
+            <option value={25}>25 / page</option>
+          </select>
         </div>
       </div>
 
@@ -512,39 +653,43 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
               <th className="p-4">Category</th>
               <th className="p-4">Department</th>
               <th className="p-4">Size</th>
+              <th className="p-4">Access Level</th>
               <th className="p-4">Date Uploaded</th>
               <th className="p-4 rounded-tr-lg text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-sm text-gray-700">
-            {mockFiles.filter(f => f.name.toLowerCase().includes(searchTerm.toLowerCase())).map((file) => (
-              <tr key={file.id} className="hover:bg-green-50/30 transition-colors group">
+            {displayedDocuments.map((doc: any) => (
+              <tr key={doc.id} className="hover:bg-green-50/30 transition-colors group">
                 <td className="p-4">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-gray-100 rounded-lg">
-                      {getFileIcon(file.type)}
+                      <FileText className="w-5 h-5 text-gray-600" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">{file.name}</p>
-                      <p className="text-xs text-gray-500">{file.id}</p>
+                      <p className="font-medium text-gray-900">{doc.document_name}</p>
+                      <p className="text-xs text-gray-500">ID: {doc.id}</p>
                     </div>
                   </div>
                 </td>
                 <td className="p-4">
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">
-                    {file.category}
+                    {doc.category}
                   </span>
                 </td>
-                <td className="p-4 text-gray-600">{file.department}</td>
-                <td className="p-4 font-mono text-xs text-gray-500">{file.size}</td>
-                <td className="p-4 text-gray-500">{file.date}</td>
+                <td className="p-4 text-gray-600">{doc.department}</td>
+                <td className="p-4 font-mono text-xs text-gray-500">{doc.document_size ? `${(doc.document_size/1024/1024).toFixed(2)} MB` : '-'}</td>
+                <td className="p-4">
+                  <span className={`text-xs px-2 py-1 rounded font-medium ${doc.access_level === 'Public' ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{doc.access_level}</span>
+                </td>
+                <td className="p-4 text-gray-500">{doc.uploaded_at ? new Date(doc.uploaded_at).toISOString().split('T')[0] : '-'}</td>
                 <td className="p-4 text-right">
                   <div className="flex items-center justify-end gap-2">
-                    <button className="p-1.5 hover:bg-green-50 text-gray-400 hover:text-green-600 rounded transition-colors" title="Download">
-                      <Download className="w-4 h-4" />
+                    <button className="p-1.5 hover:bg-green-50 text-gray-400 hover:text-green-600 rounded transition-colors" title="View files" onClick={() => viewFiles(doc.id, doc.document_name, doc.description)}>
+                      <File className="w-4 h-4" />
                     </button>
-                    <button className="p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded transition-colors">
-                      <MoreVertical className="w-4 h-4" />
+                    <button className="p-1.5 hover:bg-gray-100 text-gray-400 hover:text-gray-600 rounded transition-colors" title="Download all files as ZIP" onClick={() => window.open(`${apiUrl}/api/documents/${doc.id}/download-zip`, '_blank')}>
+                      <Download className="w-4 h-4" />
                     </button>
                   </div>
                 </td>
@@ -555,14 +700,104 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
       </div>
       
       <div className="p-4 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
-        <span>Showing {mockFiles.length} files</span>
-        <div className="flex gap-2">
-          <button className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50" disabled>Previous</button>
-          <button className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50">Next</button>
+        <span>Showing {startIndex} to {endIndex} of {totalDocs} files</span>
+        <div className="flex gap-2 items-center">
+          <button className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50 disabled:opacity-50" onClick={() => setFilePage(p => Math.max(1, p - 1))} disabled={filePage === 1}>Previous</button>
+          <div className="text-sm text-gray-600">{filePage} / {Math.max(1, Math.ceil(totalDocs / filesPerPage))}</div>
+          <button className="px-3 py-1 border border-gray-200 rounded hover:bg-gray-50" onClick={() => setFilePage(p => Math.min(Math.ceil(totalDocs / filesPerPage), p + 1))} disabled={filePage === Math.ceil(totalDocs / filesPerPage)}>Next</button>
         </div>
       </div>
+      
+      {showFilterModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-xl">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="font-semibold">Filter Documents</h3>
+              <button onClick={() => setShowFilterModal(false)} className="text-gray-500 hover:text-gray-700">×</button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
+                <select value={filterCategory} onChange={(e) => { setFilterCategory(e.target.value); setFilePage(1); }} className="w-full px-3 py-2 rounded border border-gray-200 bg-white text-sm">
+                  <option value="">All Categories</option>
+                  <option>Lab Reports</option>
+                  <option>Radiology/Imaging</option>
+                  <option>Prescriptions</option>
+                  <option>Administrative</option>
+                  <option>Legal/Consent</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Department</label>
+                <select value={filterDepartment} onChange={(e) => { setFilterDepartment(e.target.value); setFilePage(1); }} className="w-full px-3 py-2 rounded border border-gray-200 bg-white text-sm">
+                  <option value="">All Departments</option>
+                  <option>General</option>
+                  <option>Cardiology</option>
+                  <option>Neurology</option>
+                  <option>Pediatrics</option>
+                  <option>Emergency</option>
+                </select>
+              </div>
+              {isAdmin && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Access Level</label>
+                  <select value={filterAccessLevel} onChange={(e) => { setFilterAccessLevel(e.target.value); setFilePage(1); }} className="w-full px-3 py-2 rounded border border-gray-200 bg-white text-sm">
+                    <option value="">All Access Levels</option>
+                    <option>Admin Only</option>
+                    <option>Public</option>
+                  </select>
+                </div>
+              )}
+              <div className="flex gap-2 pt-4">
+                <button onClick={() => { setFilterCategory(''); setFilterDepartment(''); setFilterAccessLevel(''); setFilePage(1); }} className="flex-1 px-3 py-2 text-sm rounded border border-gray-200 bg-gray-50 hover:bg-gray-100">Clear Filters</button>
+                <button onClick={() => setShowFilterModal(false)} className="flex-1 px-3 py-2 text-sm rounded bg-green-600 text-white hover:bg-green-700">Done</button>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
+      
+      {showFilesModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-xl">
+            <div className="p-4 border-b flex justify-between items-center">
+              <h3 className="font-semibold">{currentDocumentName} — Files</h3>
+              <button onClick={() => setShowFilesModal(false)} className="text-gray-500">Close</button>
+            </div>
+            <div className="p-4 space-y-4">
+              {currentUploadedBy && (
+                <div className="pb-4 border-b">
+                  <p className="text-xs font-medium text-gray-600 mb-1">Uploaded by:</p>
+                  <p className="text-sm text-gray-700">{currentUploadedBy}</p>
+                </div>
+              )}
+              {currentDocumentDescription && (
+                <div className="pb-4 border-b">
+                  <p className="text-xs font-medium text-gray-600 mb-1">Tags / Description:</p>
+                  <p className="text-sm text-gray-700">{currentDocumentDescription}</p>
+                </div>
+              )}
+              <div className="space-y-2">
+                {currentFilesList.length === 0 && <div className="text-sm text-gray-500">No files found.</div>}
+                {currentFilesList.map((f: any) => (
+                  <div key={f.index} className="flex items-center justify-between gap-3 p-2 border border-gray-100 rounded">
+                    <div>
+                      <div className="text-sm font-medium">{f.name}</div>
+                      <div className="text-xs text-gray-400">{(f.size/1024/1024).toFixed(2)} MB • {f.type}</div>
+                    </div>
+                    <div>
+                      <button onClick={() => window.open(`${apiUrl}/api/documents/${f.documentId || ''}/download?fileIndex=${f.index}`, '_blank')} className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">Download</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </motion.div>
-  );
+    );
+  };
 
   const renderUserManagement = () => (
     <motion.div 
@@ -1087,6 +1322,20 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          {notification.message && (
+            <div className={`m-4 p-4 rounded-lg border ${notification.type === 'success' ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="text-sm">
+                  {notification.message.split('\n').map((line, idx) => (
+                    <div key={idx}>{line}</div>
+                  ))}
+                </div>
+                <button onClick={() => setNotification({ type: null, message: null })} className="text-sm font-medium underline">
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
           {activeTab === 'overview' && renderOverview()}
           {activeTab === 'upload' && renderAddFile()}
           {activeTab === 'files' && renderFileManager()}

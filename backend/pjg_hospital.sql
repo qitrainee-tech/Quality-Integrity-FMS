@@ -33,6 +33,7 @@ CREATE TABLE `documents_tbl` (
   `category` varchar(100) DEFAULT NULL,
   `department` varchar(255) DEFAULT NULL,
   `description` varchar(255) DEFAULT NULL,
+  `access_level` enum('Admin Only','Public') NOT NULL DEFAULT 'Admin Only',
   `document_size` bigint(20) DEFAULT NULL,
   `document_type` varchar(100) DEFAULT NULL,
   `document_blob` longblob DEFAULT NULL,

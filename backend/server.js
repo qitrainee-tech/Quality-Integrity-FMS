@@ -5,6 +5,7 @@ import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import multer from 'multer';
+import archiver from 'archiver';
 
 dotenv.config();
 
@@ -439,7 +440,7 @@ app.delete('/api/users/:userId', async (req, res) => {
 // Document upload route (multiple files in one row)
 app.post('/api/documents/upload', upload.array('document'), async (req, res) => {
   try {
-    const { document_name, category, department, description, uploaded_by } = req.body;
+    const { document_name, category, department, description, uploaded_by, access_level } = req.body;
 
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ success: false, message: 'No files uploaded' });
@@ -502,7 +503,8 @@ app.post('/api/documents/upload', upload.array('document'), async (req, res) => 
       });
 
       // Single insert with all files in one row
-      const sql = 'INSERT INTO documents_tbl (document_name, category, department, description, document_size, document_type, uploaded_by, document_blob) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+      // include access_level if provided (default to 'Admin Only')
+      const sql = 'INSERT INTO documents_tbl (document_name, category, department, description, document_size, document_type, uploaded_by, document_blob, access_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
       const params = [
         document_name || null,
         category || null,
@@ -511,7 +513,8 @@ app.post('/api/documents/upload', upload.array('document'), async (req, res) => 
         totalSize,
         typesJson,
         uploadedByName,
-        filesJson
+        filesJson,
+        access_level || 'Admin Only'
       ];
 
       const [result] = await connection.query(sql, params);
@@ -539,9 +542,21 @@ app.post('/api/documents/upload', upload.array('document'), async (req, res) => 
 app.get('/api/documents', async (req, res) => {
   try {
     const connection = await pool.getConnection();
-    const [rows] = await connection.query(
-      'SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at FROM documents_tbl ORDER BY uploaded_at DESC'
-    );
+    // If a userId is provided, check if user is admin; non-admins only get Public documents
+    const userId = req.query.userId;
+    let rows;
+    if (userId) {
+      const [userRows] = await connection.query('SELECT role FROM users WHERE id = ?', [userId]);
+      const isAdmin = userRows.length > 0 && userRows[0].role === 'admin';
+      if (isAdmin) {
+        [rows] = await connection.query('SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at, access_level FROM documents_tbl ORDER BY uploaded_at DESC');
+      } else {
+        [rows] = await connection.query('SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at, access_level FROM documents_tbl WHERE access_level = ? ORDER BY uploaded_at DESC', ['Public']);
+      }
+    } else {
+      // No user specified: return only public documents
+      [rows] = await connection.query('SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at, access_level FROM documents_tbl WHERE access_level = ? ORDER BY uploaded_at DESC', ['Public']);
+    }
     connection.release();
     res.json({ success: true, documents: rows });
   } catch (err) {
@@ -558,7 +573,7 @@ app.get('/api/documents/:id/download', async (req, res) => {
     
     const connection = await pool.getConnection();
     const [rows] = await connection.query(
-      'SELECT document_name, document_type, document_size, document_blob FROM documents_tbl WHERE id = ?',
+      'SELECT document_name, document_type, document_size, document_blob, uploaded_by FROM documents_tbl WHERE id = ?',
       [id]
     );
     connection.release();
@@ -620,6 +635,7 @@ app.get('/api/documents/:id/download', async (req, res) => {
         success: true, 
         documentId: id,
         documentName: doc.document_name,
+        uploadedBy: doc.uploaded_by,
         totalSize: doc.document_size,
         files: fileList 
       });
@@ -635,6 +651,69 @@ app.get('/api/documents/:id/download', async (req, res) => {
   } catch (err) {
     console.error('Download document error:', err);
     res.status(500).json({ success: false, message: 'Unable to download document' });
+  }
+});
+
+// Download all files in a document as ZIP
+app.get('/api/documents/:id/download-zip', async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const connection = await pool.getConnection();
+    const [rows] = await connection.query(
+      'SELECT document_name, document_blob FROM documents_tbl WHERE id = ?',
+      [id]
+    );
+    connection.release();
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Document not found' });
+    }
+
+    const doc = rows[0];
+    const blobData = doc.document_blob;
+    
+    if (!blobData) {
+      return res.status(404).json({ success: false, message: 'Document content not found' });
+    }
+
+    let filesData;
+    try {
+      const blobStr = blobData.toString('utf8');
+      filesData = JSON.parse(blobStr);
+    } catch (e) {
+      console.log('Could not parse as JSON, treating as binary blob');
+      filesData = [];
+    }
+
+    if (!Array.isArray(filesData) || filesData.length === 0) {
+      return res.status(400).json({ success: false, message: 'No files to download' });
+    }
+
+    // Create zip archive
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    const filename = (doc.document_name || `document-${id}`).replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}.zip"`);
+    
+    archive.pipe(res);
+
+    // Add each file to the zip
+    filesData.forEach((file, idx) => {
+      const buffer = Buffer.from(file.data, 'base64');
+      archive.append(buffer, { name: file.name });
+    });
+
+    archive.finalize();
+
+    archive.on('error', (err) => {
+      console.error('Archive error:', err);
+      res.status(500).json({ success: false, message: 'Error creating zip file' });
+    });
+  } catch (err) {
+    console.error('Download zip error:', err);
+    res.status(500).json({ success: false, message: 'Unable to download zip' });
   }
 });
 
