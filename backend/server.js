@@ -58,7 +58,7 @@ app.post('/api/login', async (req, res) => {
 
     // Query user by email
     const [rows] = await connection.query(
-      'SELECT id, email, password, name, role FROM users WHERE email = ?',
+      'SELECT id, email, password, name, role, status FROM users WHERE email = ?',
       [email]
     );
 
@@ -87,6 +87,14 @@ app.post('/api/login', async (req, res) => {
       return res.status(401).json({ 
         success: false, 
         message: 'Invalid email or password' 
+      });
+    }
+
+    // Check if user is inactive
+    if (user.status === 'Inactive') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'This account has been deactivated. Please contact an administrator.' 
       });
     }
 
@@ -397,13 +405,13 @@ app.delete('/api/users/:userId', async (req, res) => {
       });
     }
 
-    // Delete user
+    // Set user status to Inactive instead of deleting
     const [result] = await connection.query(
-      'DELETE FROM users WHERE id = ? AND role = "user"',
-      [userId]
+      'UPDATE users SET status = ? WHERE id = ? AND role = "user"',
+      ['Inactive', userId]
     );
 
-    console.log('Delete result:', result);
+    console.log('Deactivate result:', result);
 
     connection.release();
 
@@ -416,7 +424,7 @@ app.delete('/api/users/:userId', async (req, res) => {
 
     res.json({ 
       success: true, 
-      message: 'User deleted successfully' 
+      message: 'User deactivated successfully' 
     });
 
   } catch (error) {

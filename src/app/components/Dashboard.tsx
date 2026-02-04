@@ -106,6 +106,20 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   const MAX_UPLOAD_BYTES = 200 * 1024 * 1024; // 200MB per file
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Account management: search and filters
+  const [userSearch, setUserSearch] = useState('');
+  const [userFilterDept, setUserFilterDept] = useState('');
+  const [userFilterRole, setUserFilterRole] = useState('');
+
+  const filteredUsers = users
+    .filter(u => {
+      const q = userSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (u.name || '').toString().toLowerCase().includes(q) || (u.email || '').toString().toLowerCase().includes(q);
+    })
+    .filter(u => userFilterDept ? ((u.department || '') === userFilterDept) : true)
+    .filter(u => userFilterRole ? ((u.role || '').toString().toLowerCase() === userFilterRole.toLowerCase()) : true);
+
   const toggleSidebar = () => setIsSidebarOpen(!isSidebarOpen);
 
   const handleAddUser = async (e: React.FormEvent) => {
@@ -194,6 +208,10 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     }
   };
 
+  // ...existing code...
+
+
+  
   const renderOverview = () => (
     <motion.div 
       initial={{ opacity: 0, y: 10 }}
@@ -345,14 +363,13 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             </select>
           </div>
 
-          {/* <div className="space-y-2">
+          <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Access Level</label>
             <select value={accessLevel} onChange={(e) => setAccessLevel(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none transition-all bg-white">
-              <option>Confidential (Restricted)</option>
-              <option>Internal Staff Only</option>
+              <option>Admin Only</option>
               <option>Public</option>
             </select>
-          </div> */}
+          </div>
 
           <div className="md:col-span-2 space-y-2">
             <label className="text-sm font-medium text-gray-700">Description / Tags</label>
@@ -559,6 +576,45 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
           <h2 className="text-xl font-bold text-gray-900">Account Management</h2>
           <p className="text-sm text-gray-500 mt-1">Manage system access and user roles</p>
         </div>
+        <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search users by name or email..."
+              value={userSearch}
+              onChange={(e) => { setUserSearch(e.target.value); setCurrentPage(1); }}
+              className="w-full sm:w-64 pl-9 pr-3 py-2 rounded-lg border border-gray-200 focus:border-green-500 focus:ring-2 focus:ring-green-500/20 outline-none text-sm"
+            />
+          </div>
+          <select
+            value={userFilterDept}
+            onChange={(e) => { setUserFilterDept(e.target.value); setCurrentPage(1); }}
+            className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm"
+          >
+            <option value="">All Departments</option>
+            <option>General</option>
+            <option>Cardiology</option>
+            <option>Pediatrics</option>
+            <option>Quality Improvement</option>
+            <option>Administration</option>
+          </select>
+          <select
+            value={userFilterRole}
+            onChange={(e) => { setUserFilterRole(e.target.value); setCurrentPage(1); }}
+            className="px-3 py-2 rounded-lg border border-gray-200 bg-white text-sm"
+          >
+            <option value="">All Roles</option>
+            <option value="Admin">Admin</option>
+            <option value="User">User</option>
+          </select>
+          <button
+            onClick={() => { setUserSearch(''); setUserFilterDept(''); setUserFilterRole(''); setCurrentPage(1); }}
+            className="px-3 py-2 text-sm rounded-lg border border-gray-200 bg-gray-50"
+          >
+            Clear
+          </button>
+        </div>
         <button 
           onClick={() => setShowAddUserModal(true)}
           className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
@@ -580,7 +636,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100 text-sm text-gray-700">
-            {users.slice((currentPage - 1) * usersPerPage, currentPage * usersPerPage).map((u) => (
+            {filteredUsers.slice((currentPage - 1) * usersPerPage, currentPage * usersPerPage).map((u) => (
               <tr key={u.id} className="hover:bg-green-50/30 transition-colors group">
                 <td className="p-4">
                   <div className="flex items-center gap-3">
@@ -628,7 +684,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                     <button 
                       className="p-1.5 hover:bg-red-50 text-gray-400 hover:text-red-600 rounded transition-colors"
                       onClick={async () => {
-                        if (!confirm('Are you sure you want to remove this user?')) return;
+                        if (!confirm('Deactivate this user? They will not be able to sign in, but the account can be reactivated by an admin.')) return;
                         try {
                           const res = await fetch(`${apiUrl}/api/users/${u.id}?adminId=${user.id}`, {
                             method: 'DELETE'
@@ -638,14 +694,14 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                             await fetchUsers();
                             setNotification({ type: 'success', message: data.message });
                           } else {
-                            setNotification({ type: 'error', message: 'Delete failed: ' + (data.message || 'Unknown') });
+                            setNotification({ type: 'error', message: 'Deactivation failed: ' + (data.message || 'Unknown') });
                           }
                         } catch (err) {
-                          console.error('Delete user error:', err);
-                          setNotification({ type: 'error', message: 'Unable to delete user. See console for details.' });
+                          console.error('Deactivate user error:', err);
+                          setNotification({ type: 'error', message: 'Unable to deactivate user. See console for details.' });
                         }
                       }}
-                      title="Delete user"
+                      title="Deactivate user"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -660,7 +716,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
       {/* Pagination */}
       <div className="p-4 border-t border-gray-100 flex items-center justify-between">
         <span className="text-sm text-gray-600">
-          Showing {Math.min((currentPage - 1) * usersPerPage + 1, users.length)} to {Math.min(currentPage * usersPerPage, users.length)} of {users.length} users
+          Showing {Math.min((currentPage - 1) * usersPerPage + 1, filteredUsers.length)} to {Math.min(currentPage * usersPerPage, filteredUsers.length)} of {filteredUsers.length} users
         </span>
         <div className="flex items-center gap-2">
           <button
@@ -675,12 +731,12 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
           </button>
           <div className="flex items-center gap-1 px-3 py-2 bg-gray-50 rounded-lg">
             <span className="text-sm font-medium text-gray-700">
-              {currentPage} / {Math.ceil(users.length / usersPerPage) || 1}
+              {currentPage} / {Math.ceil(filteredUsers.length / usersPerPage) || 1}
             </span>
           </div>
           <button
             onClick={() => setCurrentPage(currentPage + 1)}
-            disabled={currentPage === Math.ceil(users.length / usersPerPage)}
+            disabled={currentPage === Math.ceil(filteredUsers.length / usersPerPage)}
             className="p-2 hover:bg-gray-100 disabled:bg-gray-50 disabled:text-gray-300 disabled:cursor-not-allowed text-gray-600 rounded-lg transition-colors"
             title="Next page"
           >
@@ -774,7 +830,6 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                   className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
                 >
                   <option value="Active">Active</option>
-                  <option value="Offline">Offline</option>
                   <option value="Inactive">Inactive</option>
                 </select>
               </div>
@@ -877,11 +932,10 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                 <label className="text-sm font-medium text-gray-700">Status</label>
                 <select 
                   value={editedUser.status}
-                  onChange={e => setEditedUser({...editedUser, status: e.target.value as 'Active' | 'Offline' | 'Inactive'})}
+                  onChange={e => setEditedUser({...editedUser, status: e.target.value})}
                   className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
                 >
                   <option value="Active">Active</option>
-                  <option value="Offline">Offline</option>
                   <option value="Inactive">Inactive</option>
                 </select>
               </div>
