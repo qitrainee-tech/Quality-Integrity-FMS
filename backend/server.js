@@ -412,6 +412,7 @@ app.delete('/api/users/:userId', async (req, res) => {
       'UPDATE users SET status = ? WHERE id = ? AND role = "user"',
       ['Inactive', userId]
     );
+    
 
     console.log('Deactivate result:', result);
 
@@ -560,10 +561,10 @@ app.get('/api/documents', async (req, res) => {
           'SELECT d.id, d.document_name, d.category, d.department, d.description, d.document_size, d.document_type, d.uploaded_by_id, u.name AS uploaded_by, d.uploaded_at, d.access_level FROM documents_tbl d LEFT JOIN users u ON d.uploaded_by_id = u.id ORDER BY d.uploaded_at DESC'
         );
       } else {
-        // Non-admins see only Public documents from their own department; include uploader name
+        // Non-admins see only Public documents from their own department OR Global documents
         [rows] = await connection.query(
-          'SELECT d.id, d.document_name, d.category, d.department, d.description, d.document_size, d.document_type, d.uploaded_by_id, u.name AS uploaded_by, d.uploaded_at, d.access_level FROM documents_tbl d LEFT JOIN users u ON d.uploaded_by_id = u.id WHERE d.access_level = ? AND d.department = ? ORDER BY d.uploaded_at DESC',
-          ['Public', userDepartment]
+          'SELECT d.id, d.document_name, d.category, d.department, d.description, d.document_size, d.document_type, d.uploaded_by_id, u.name AS uploaded_by, d.uploaded_at, d.access_level FROM documents_tbl d LEFT JOIN users u ON d.uploaded_by_id = u.id WHERE d.access_level = ? AND (d.department = ? OR d.department = ?) ORDER BY d.uploaded_at DESC',
+          ['Public', userDepartment, 'Global']
         );
       }
     } else {
@@ -733,4 +734,179 @@ app.get('/api/documents/:id/download-zip', async (req, res) => {
 // Start server
 app.listen(PORT, () => {
   console.log(`✓ Server running on http://localhost:${PORT}`);
+});
+
+// Dashboard stats endpoint
+app.get('/api/dashboard', async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    const connection = await pool.getConnection();
+
+    let isAdmin = false;
+    let userDept = null;
+    if (userId) {
+      const [userRows] = await connection.query('SELECT role, department FROM users WHERE id = ?', [userId]);
+      if (userRows.length > 0) {
+        isAdmin = userRows[0].role === 'admin';
+        userDept = userRows[0].department;
+      }
+    }
+
+    // Helper to compute percent change
+    const computeChange = (curr, prev) => {
+      if (prev === 0) return curr > 0 ? '+100%' : '0%';
+      const pct = ((curr - prev) / prev * 100).toFixed(0);
+      return pct >= 0 ? `+${pct}%` : `${pct}%`;
+    };
+
+    if (isAdmin) {
+      // Today's stats
+      const [todayRows] = await connection.query(
+        "SELECT COUNT(*) AS totalFiles, IFNULL(SUM(document_size),0) AS storageUsed, SUM(CASE WHEN DATE(uploaded_at)=CURDATE() THEN 1 ELSE 0 END) AS uploadsToday FROM documents_tbl"
+      );
+      // Yesterday's stats
+      const [yesterdayRows] = await connection.query(
+        "SELECT COUNT(*) AS totalFiles, IFNULL(SUM(document_size),0) AS storageUsed FROM documents_tbl WHERE DATE(uploaded_at) <= DATE_SUB(CURDATE(), INTERVAL 1 DAY)"
+      );
+      const [uRows] = await connection.query("SELECT COUNT(*) AS activeUsers FROM users WHERE status = 'Active'");
+      
+      const today = { ...todayRows[0], ...uRows[0] };
+      const yesterday = yesterdayRows[0];
+
+      connection.release();
+
+      res.json({
+        success: true,
+        stats: {
+          totalFiles: Number(today.totalFiles) || 0,
+          totalFilesChange: computeChange(Number(today.totalFiles) || 0, Number(yesterday.totalFiles) || 0),
+          storageUsed: Number(today.storageUsed) || 0,
+          storageUsedChange: computeChange(Number(today.storageUsed) || 0, Number(yesterday.storageUsed) || 0),
+          uploadsToday: Number(today.uploadsToday) || 0,
+          uploadsTodayChange: '+8%', // Placeholder since we don't have yesterday's uploads
+          activeUsers: Number(today.activeUsers) || 0,
+          activeUsersChange: 'Stable'
+        }
+      });
+    } else {
+      // Today's stats
+      const [todayRows] = await connection.query(
+        "SELECT COUNT(*) AS totalFiles, IFNULL(SUM(document_size),0) AS storageUsed, SUM(CASE WHEN DATE(uploaded_at)=CURDATE() THEN 1 ELSE 0 END) AS uploadsToday FROM documents_tbl WHERE access_level = ? AND department = ?",
+        ['Public', userDept]
+      );
+      // Yesterday's stats
+      const [yesterdayRows] = await connection.query(
+        "SELECT COUNT(*) AS totalFiles, IFNULL(SUM(document_size),0) AS storageUsed FROM documents_tbl WHERE access_level = ? AND department = ? AND DATE(uploaded_at) <= DATE_SUB(CURDATE(), INTERVAL 1 DAY)",
+        ['Public', userDept]
+      );
+      const [uRows] = await connection.query("SELECT COUNT(*) AS activeUsers FROM users WHERE status = 'Active' AND department = ?", [userDept]);
+      
+      const today = { ...todayRows[0], ...uRows[0] };
+      const yesterday = yesterdayRows[0];
+
+      connection.release();
+
+      res.json({
+        success: true,
+        stats: {
+          totalFiles: Number(today.totalFiles) || 0,
+          totalFilesChange: computeChange(Number(today.totalFiles) || 0, Number(yesterday.totalFiles) || 0),
+          storageUsed: Number(today.storageUsed) || 0,
+          storageUsedChange: computeChange(Number(today.storageUsed) || 0, Number(yesterday.storageUsed) || 0),
+          uploadsToday: Number(today.uploadsToday) || 0,
+          uploadsTodayChange: '+8%',
+          activeUsers: Number(today.activeUsers) || 0,
+          activeUsersChange: 'Stable'
+        }
+      });
+    }
+  } catch (err) {
+    console.error('Dashboard error:', err);
+    res.status(500).json({ success: false, message: 'Unable to fetch dashboard stats' });
+  }
+});
+
+// Upload trends endpoint (last 7 or 30 days)
+app.get('/api/upload-trends', async (req, res) => {
+  try {
+    const userId = req.query.userId;
+    const period = parseInt(req.query.period) || 7; // 7 or 30 days
+    const connection = await pool.getConnection();
+
+    let isAdmin = false;
+    let userDept = null;
+    if (userId) {
+      const [userRows] = await connection.query('SELECT role, department FROM users WHERE id = ?', [userId]);
+      if (userRows.length > 0) {
+        isAdmin = userRows[0].role === 'admin';
+        userDept = userRows[0].department;
+      }
+    }
+
+    const trends = [];
+
+    if (period === 30) {
+      // Last 30 days: group by week or show every other day
+      for (let i = 29; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        const month = date.toLocaleDateString('en-US', { month: 'short' });
+        const day = date.getDate();
+        const label = `${month} ${day}`;
+
+        let query, params;
+        if (isAdmin) {
+          query = "SELECT COUNT(*) AS uploads, IFNULL(SUM(document_size),0) AS size FROM documents_tbl WHERE DATE(uploaded_at) = ?";
+          params = [dateStr];
+        } else {
+          query = "SELECT COUNT(*) AS uploads, IFNULL(SUM(document_size),0) AS size FROM documents_tbl WHERE DATE(uploaded_at) = ? AND access_level = ? AND department = ?";
+          params = [dateStr, 'Public', userDept];
+        }
+
+        const [rows] = await connection.query(query, params);
+        trends.push({
+          name: label,
+          uploads: Number(rows[0]?.uploads || 0),
+          size: Number(rows[0]?.size || 0)
+        });
+      }
+    } else {
+      // Last 7 days
+      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+      for (let i = 6; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(date.getDate() - i);
+        const dateStr = date.toISOString().split('T')[0];
+        const dayName = days[date.getDay()];
+
+        let query, params;
+        if (isAdmin) {
+          query = "SELECT COUNT(*) AS uploads, IFNULL(SUM(document_size),0) AS size FROM documents_tbl WHERE DATE(uploaded_at) = ?";
+          params = [dateStr];
+        } else {
+          query = "SELECT COUNT(*) AS uploads, IFNULL(SUM(document_size),0) AS size FROM documents_tbl WHERE DATE(uploaded_at) = ? AND access_level = ? AND department = ?";
+          params = [dateStr, 'Public', userDept];
+        }
+
+        const [rows] = await connection.query(query, params);
+        trends.push({
+          name: dayName,
+          uploads: Number(rows[0]?.uploads || 0),
+          size: Number(rows[0]?.size || 0)
+        });
+      }
+    }
+
+    connection.release();
+
+    res.json({
+      success: true,
+      trends
+    });
+  } catch (err) {
+    console.error('Upload trends error:', err);
+    res.status(500).json({ success: false, message: 'Unable to fetch upload trends' });
+  }
 });

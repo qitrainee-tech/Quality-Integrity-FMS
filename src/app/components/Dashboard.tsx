@@ -95,6 +95,97 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001';
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | null; message: string | null }>({ type: null, message: null });
 
+  // Dashboard stats fetched from backend
+  const [stats, setStats] = useState<{ 
+    totalFiles: number; 
+    totalFilesChange: string;
+    storageUsed: number; 
+    storageUsedChange: string;
+    uploadsToday: number; 
+    uploadsTodayChange: string;
+    activeUsers: number;
+    activeUsersChange: string;
+  }>({
+    totalFiles: 0,
+    totalFilesChange: '—',
+    storageUsed: 0,
+    storageUsedChange: '—',
+    uploadsToday: 0,
+    uploadsTodayChange: '—',
+    activeUsers: 0,
+    activeUsersChange: 'Stable'
+  });
+
+  // Chart data for upload trends
+  const [chartData, setChartData] = useState<any[]>([
+    { name: 'Sun', uploads: 0, size: 0 },
+    { name: 'Mon', uploads: 0, size: 0 },
+    { name: 'Tue', uploads: 0, size: 0 },
+    { name: 'Wed', uploads: 0, size: 0 },
+    { name: 'Thu', uploads: 0, size: 0 },
+    { name: 'Fri', uploads: 0, size: 0 },
+    { name: 'Sat', uploads: 0, size: 0 }
+  ]);
+  const [trendsPeriod, setTrendsPeriod] = useState<7 | 30>(7);
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes || bytes === 0) return '0 B';
+    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(i > 0 ? 2 : 0)} ${sizes[i]}`;
+  };
+
+  const fetchDashboardStats = async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/dashboard?userId=${user.id}`);
+      const data = await res.json();
+      if (data.success) {
+        setStats(data.stats || { 
+          totalFiles: 0, 
+          totalFilesChange: '—',
+          storageUsed: 0, 
+          storageUsedChange: '—',
+          uploadsToday: 0, 
+          uploadsTodayChange: '—',
+          activeUsers: 0,
+          activeUsersChange: 'Stable'
+        });
+      } else {
+        console.error('Failed to fetch dashboard stats:', data.message);
+      }
+    } catch (err) {
+      console.error('Fetch dashboard stats error:', err);
+    }
+  };
+
+  const fetchUploadTrends = async (period: 7 | 30 = trendsPeriod) => {
+    try {
+      const res = await fetch(`${apiUrl}/api/upload-trends?userId=${user.id}&period=${period}`);
+      const data = await res.json();
+      if (data.success && data.trends) {
+        setChartData(data.trends);
+        setTrendsPeriod(period);
+      } else {
+        console.error('Failed to fetch upload trends:', data.message);
+      }
+    } catch (err) {
+      console.error('Fetch upload trends error:', err);
+    }
+  };
+
+  useEffect(() => {
+    // fetch on mount and when activeTab is overview
+    fetchDashboardStats();
+    fetchUploadTrends(7);
+  }, [user.id]);
+
+  useEffect(() => {
+    if (activeTab === 'overview') {
+      fetchDashboardStats();
+      fetchUploadTrends();
+    }
+  }, [activeTab]);
+
   // Upload form state
   const [docName, setDocName] = useState('');
   const [categoryDoc, setCategoryDoc] = useState('');
@@ -155,7 +246,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   };
 
   useEffect(() => {
-    if (activeTab === 'files') fetchDocuments();
+    if (activeTab === 'overview' || activeTab === 'files') fetchDocuments();
   }, [activeTab]);
 
   const viewFiles = async (docId: number, docName: string, description: string = '') => {
@@ -278,10 +369,10 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     >
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {[
-          { label: 'Total Files', value: '14,284', change: '+12%', color: 'bg-blue-50 text-blue-600', icon: File },
-          { label: 'Storage Used', value: '1.2 TB', change: '45%', color: 'bg-green-50 text-green-600', icon: HardDrive },
-          { label: 'Uploads Today', value: '128', change: '+8%', color: 'bg-amber-50 text-amber-600', icon: Upload },
-          { label: 'Active Users', value: users.length.toString(), change: 'Stable', color: 'bg-purple-50 text-purple-600', icon: Users },
+          { label: 'Total Files', value: stats.totalFiles.toLocaleString(), change: stats.totalFilesChange, color: 'bg-blue-50 text-blue-600', icon: File },
+          { label: 'Storage Used', value: formatBytes(stats.storageUsed), change: stats.storageUsedChange, color: 'bg-green-50 text-green-600', icon: HardDrive },
+          { label: 'Uploads Today', value: stats.uploadsToday.toLocaleString(), change: stats.uploadsTodayChange, color: 'bg-amber-50 text-amber-600', icon: Upload },
+          { label: 'Active Users', value: stats.activeUsers.toString(), change: stats.activeUsersChange, color: 'bg-purple-50 text-purple-600', icon: Users },
         ].map((stat, i) => (
           <div key={i} className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
             <div className="flex items-center justify-between mb-4">
@@ -306,14 +397,18 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
         <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
           <div className="flex items-center justify-between mb-6">
             <h3 className="text-lg font-bold text-gray-900">Storage Usage Trends</h3>
-            <select className="text-sm border-gray-200 rounded-lg text-gray-500 outline-none">
-              <option>Last 7 Days</option>
-              <option>Last Month</option>
+            <select 
+              value={trendsPeriod} 
+              onChange={(e) => fetchUploadTrends(parseInt(e.target.value) as 7 | 30)}
+              className="text-sm border-gray-200 rounded-lg text-gray-500 outline-none"
+            >
+              <option value={7}>Last 7 Days</option>
+              <option value={30}>Last Month</option>
             </select>
           </div>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={mockChartData}>
+              <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="colorUploads" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#16a34a" stopOpacity={0.1}/>
@@ -335,18 +430,32 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
         <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
           <h3 className="text-lg font-bold text-gray-900 mb-6">Quick Access</h3>
           <div className="space-y-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="flex items-center gap-4 p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-gray-100">
-                <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-                  <FileText className="w-5 h-5" />
+            {documents.length === 0 ? (
+              <p className="text-sm text-gray-500 py-4">No files available</p>
+            ) : (
+              documents.slice(0, 4).map((doc: any) => (
+                <div key={doc.id} className="flex items-center gap-4 p-3 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer border border-transparent hover:border-gray-100" onClick={() => viewFiles(doc.id, doc.document_name, doc.description)}>
+                  <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold text-gray-900 truncate">{doc.document_name}</h4>
+                    <p className="text-xs text-gray-500">{doc.category} • {doc.document_size ? `${(doc.document_size/1024/1024).toFixed(1)} MB` : 'N/A'}</p>
+                  </div>
+                  <span className="text-xs text-gray-400">{doc.uploaded_at ? (() => {
+                    const date = new Date(doc.uploaded_at);
+                    const now = new Date();
+                    const diffMs = now.getTime() - date.getTime();
+                    const diffMins = Math.floor(diffMs / 60000);
+                    if (diffMins < 60) return `${diffMins}m ago`;
+                    const diffHours = Math.floor(diffMins / 60);
+                    if (diffHours < 24) return `${diffHours}h ago`;
+                    const diffDays = Math.floor(diffHours / 24);
+                    return `${diffDays}d ago`;
+                  })() : 'N/A'}</span>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-semibold text-gray-900 truncate">Lab_Report_Final_v2.pdf</h4>
-                  <p className="text-xs text-gray-500">Pathology • 2.4 MB</p>
-                </div>
-                <span className="text-xs text-gray-400">2h ago</span>
-              </div>
-            ))}
+              ))
+            )}
           </div>
           <button 
             onClick={() => setActiveTab('files')}
@@ -406,25 +515,6 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
             </select>
             {uploadErrors.category && <p className="text-xs text-red-600 mt-1">{uploadErrors.category}</p>}
           </div>
-
-          {isAdmin && (
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-gray-700">Department</label>
-              <select
-                value={departmentDoc}
-                onChange={(e) => { setDepartmentDoc(e.target.value); if (uploadErrors.department) setUploadErrors(prev => ({ ...prev, department: undefined })); }}
-                className={`w-full px-4 py-2 rounded-lg border ${uploadErrors.department ? 'border-red-500 focus:ring-red-200' : 'border-gray-200 focus:border-green-500 focus:ring-green-500/20'} outline-none transition-all bg-white`}
-              >
-                <option value="">Select Department</option>
-                <option>General</option>
-                <option>Cardiology</option>
-                <option>Neurology</option>
-                <option>Pediatrics</option>
-                <option>Emergency</option>
-              </select>
-              {uploadErrors.department && <p className="text-xs text-red-600 mt-1">{uploadErrors.department}</p>}
-            </div>
-          )}
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-gray-700">Access Level</label>
@@ -515,7 +605,6 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                 const errors: { docName?: string; category?: string; department?: string } = {};
                 if (!docName.trim()) errors.docName = 'Document name is required';
                 if (!categoryDoc) errors.category = 'Please select a category';
-                if (isAdmin && !departmentDoc) errors.department = 'Please select a department';
                 if (Object.keys(errors).length > 0) {
                   setUploadErrors(errors);
                   setNotification({ type: 'error', message: 'Please complete the highlighted fields before uploading.' });
@@ -545,7 +634,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                 
                 form.append('document_name', docName);
                 form.append('category', categoryDoc);
-                form.append('department', isAdmin ? departmentDoc : (user.department || 'General'));
+                form.append('department', isAdmin ? 'Global' : (user.department || 'General'));
                 form.append('description', descriptionDoc);
                 form.append('uploaded_by', String(user.id));
                 form.append('access_level', accessLevel);
@@ -1041,21 +1130,23 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                     <option value="Admin">Admin</option>
                   </select>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-gray-700">Department</label>
-                  <select 
-                    required
-                    value={newUser.department}
-                    onChange={e => setNewUser({...newUser, department: e.target.value})}
-                    className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
-                  >
-                    <option value="General">General</option>
-                    <option value="Cardiology">Cardiology</option>
-                    <option value="Pediatrics">Pediatrics</option>
-                    <option value="Quality Improvement">Quality Improvement</option>
-                    <option value="Administration">Administration</option>
-                  </select>
-                </div>
+                {newUser.role !== 'Admin' && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Department</label>
+                    <select 
+                      required
+                      value={newUser.department}
+                      onChange={e => setNewUser({...newUser, department: e.target.value})}
+                      className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
+                    >
+                      <option value="General">General</option>
+                      <option value="Cardiology">Cardiology</option>
+                      <option value="Pediatrics">Pediatrics</option>
+                      <option value="Quality Improvement">Quality Improvement</option>
+                      <option value="Administration">Administration</option>
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-700">Status</label>
