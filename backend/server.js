@@ -59,7 +59,7 @@ app.post('/api/login', async (req, res) => {
 
     // Query user by email
     const [rows] = await connection.query(
-      'SELECT id, email, password, name, role, status FROM users WHERE email = ?',
+      'SELECT id, email, password, name, role, department, status FROM users WHERE email = ?',
       [email]
     );
 
@@ -107,7 +107,8 @@ app.post('/api/login', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name,
-        role: user.role
+        role: user.role,
+        department: user.department
       }
     });
 
@@ -449,16 +450,18 @@ app.post('/api/documents/upload', upload.array('document'), async (req, res) => 
     const connection = await pool.getConnection();
 
     try {
-      // Fetch username once
+      // Determine uploader id and name (store both: id for relation, name for human-readability)
       let uploadedByName = null;
+      let uploadedById = null;
       if (uploaded_by) {
         const userId = parseInt(uploaded_by, 10);
-        const [userRows] = await connection.query(
-          'SELECT name FROM users WHERE id = ?',
-          [userId]
-        );
-        if (userRows.length > 0) {
-          uploadedByName = userRows[0].name;
+        uploadedById = Number.isNaN(userId) ? null : userId;
+        if (uploadedById) {
+          const [userRows] = await connection.query(
+            'SELECT name FROM users WHERE id = ?',
+            [uploadedById]
+          );
+          if (userRows.length > 0) uploadedByName = userRows[0].name;
         }
       }
 
@@ -504,7 +507,7 @@ app.post('/api/documents/upload', upload.array('document'), async (req, res) => 
 
       // Single insert with all files in one row
       // include access_level if provided (default to 'Admin Only')
-      const sql = 'INSERT INTO documents_tbl (document_name, category, department, description, document_size, document_type, uploaded_by, document_blob, access_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+      const sql = 'INSERT INTO documents_tbl (document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_by_id, document_blob, access_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
       const params = [
         document_name || null,
         category || null,
@@ -513,6 +516,7 @@ app.post('/api/documents/upload', upload.array('document'), async (req, res) => 
         totalSize,
         typesJson,
         uploadedByName,
+        uploadedById,
         filesJson,
         access_level || 'Admin Only'
       ];
@@ -542,20 +546,29 @@ app.post('/api/documents/upload', upload.array('document'), async (req, res) => 
 app.get('/api/documents', async (req, res) => {
   try {
     const connection = await pool.getConnection();
-    // If a userId is provided, check if user is admin; non-admins only get Public documents
+    // If a userId is provided, check if user is admin; non-admins only get Public documents from their own department
     const userId = req.query.userId;
     let rows;
     if (userId) {
-      const [userRows] = await connection.query('SELECT role FROM users WHERE id = ?', [userId]);
+      const [userRows] = await connection.query('SELECT role, department FROM users WHERE id = ?', [userId]);
       const isAdmin = userRows.length > 0 && userRows[0].role === 'admin';
+      const userDepartment = userRows.length > 0 ? userRows[0].department : null;
+      
       if (isAdmin) {
-        [rows] = await connection.query('SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at, access_level FROM documents_tbl ORDER BY uploaded_at DESC');
+        // Admins see all documents; include uploader name by joining users
+        [rows] = await connection.query(
+          'SELECT d.id, d.document_name, d.category, d.department, d.description, d.document_size, d.document_type, d.uploaded_by_id, u.name AS uploaded_by, d.uploaded_at, d.access_level FROM documents_tbl d LEFT JOIN users u ON d.uploaded_by_id = u.id ORDER BY d.uploaded_at DESC'
+        );
       } else {
-        [rows] = await connection.query('SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at, access_level FROM documents_tbl WHERE access_level = ? ORDER BY uploaded_at DESC', ['Public']);
+        // Non-admins see only Public documents from their own department; include uploader name
+        [rows] = await connection.query(
+          'SELECT d.id, d.document_name, d.category, d.department, d.description, d.document_size, d.document_type, d.uploaded_by_id, u.name AS uploaded_by, d.uploaded_at, d.access_level FROM documents_tbl d LEFT JOIN users u ON d.uploaded_by_id = u.id WHERE d.access_level = ? AND d.department = ? ORDER BY d.uploaded_at DESC',
+          ['Public', userDepartment]
+        );
       }
     } else {
-      // No user specified: return only public documents
-      [rows] = await connection.query('SELECT id, document_name, category, department, description, document_size, document_type, uploaded_by, uploaded_at, access_level FROM documents_tbl WHERE access_level = ? ORDER BY uploaded_at DESC', ['Public']);
+      // No user specified: return only public documents from all departments (for anonymous access)
+      [rows] = await connection.query('SELECT d.id, d.document_name, d.category, d.department, d.description, d.document_size, d.document_type, d.uploaded_by_id, u.name AS uploaded_by, d.uploaded_at, d.access_level FROM documents_tbl d LEFT JOIN users u ON d.uploaded_by_id = u.id WHERE d.access_level = ? ORDER BY d.uploaded_at DESC', ['Public']);
     }
     connection.release();
     res.json({ success: true, documents: rows });
@@ -573,7 +586,7 @@ app.get('/api/documents/:id/download', async (req, res) => {
     
     const connection = await pool.getConnection();
     const [rows] = await connection.query(
-      'SELECT document_name, document_type, document_size, document_blob, uploaded_by FROM documents_tbl WHERE id = ?',
+      'SELECT d.document_name, d.document_type, d.document_size, d.document_blob, d.uploaded_by_id, u.name AS uploaded_by FROM documents_tbl d LEFT JOIN users u ON d.uploaded_by_id = u.id WHERE d.id = ?',
       [id]
     );
     connection.release();
