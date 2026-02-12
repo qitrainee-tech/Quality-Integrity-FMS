@@ -12,6 +12,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Hardcoded reCAPTCHA Secret Key (for development)
+const RECAPTCHA_SECRET_KEY = '6LcjmmgsAAAAAPoAIAUdWF4biXjW1sjm7cinWODo';
+
 // Middleware
 app.use(cors());
 app.use(bodyParser.json());
@@ -44,7 +47,7 @@ app.get('/api/health', (req, res) => {
 // Login Route
 app.post('/api/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, recaptchaToken } = req.body;
 
     // Validate input
     if (!email || !password) {
@@ -52,6 +55,45 @@ app.post('/api/login', async (req, res) => {
         success: false, 
         message: 'Email and password are required' 
       });
+    }
+
+    // Verify reCAPTCHA token if provided
+    if (recaptchaToken) {
+      try {
+        const verificationUrl = 'https://www.google.com/recaptcha/api/siteverify';
+        const recaptchaResponse = await fetch(verificationUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({
+            secret: RECAPTCHA_SECRET_KEY,
+            response: recaptchaToken,
+          }),
+        });
+
+        const recaptchaData = await recaptchaResponse.json();
+        console.log('reCAPTCHA response:', recaptchaData);
+
+        // Check reCAPTCHA score and success - BLOCK login if failed
+        if (!recaptchaData.success || recaptchaData.score < 0.5) {
+          console.warn('❌ reCAPTCHA verification failed. Success:', recaptchaData.success, 'Score:', recaptchaData.score);
+          return res.status(400).json({ 
+            success: false, 
+            message: 'reCAPTCHA verification failed. Please try again.' 
+          });
+        } else {
+          console.log('✓ reCAPTCHA verified successfully, score:', recaptchaData.score);
+        }
+      } catch (recaptchaErr) {
+        console.error('reCAPTCHA verification error:', recaptchaErr);
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Server error during verification' 
+        });
+      }
+    } else {
+      console.warn('⚠ reCAPTCHA token not provided');
     }
 
     // Get connection from pool

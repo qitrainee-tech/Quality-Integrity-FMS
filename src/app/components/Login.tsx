@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { motion } from "motion/react";
 import logo from "../../assets/logo.png";
 import {
@@ -16,6 +16,15 @@ interface LoginProps {
   onLogin: (userData: any) => void;
 }
 
+// Hardcoded reCAPTCHA Site Key (for development)
+const RECAPTCHA_SITE_KEY = '6LcjmmgsAAAAADYmpP8sDPF9rc3TwAwSBNfWyy44';
+
+declare global {
+  interface Window {
+    grecaptcha: any;
+  }
+}
+
 export function Login({ onLogin }: LoginProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,20 +32,57 @@ export function Login({ onLogin }: LoginProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Load reCAPTCHA script on component mount
+  useEffect(() => {
+    const recaptchaScript = document.createElement("script");
+    recaptchaScript.src =
+      `https://www.google.com/recaptcha/api.js?render=${RECAPTCHA_SITE_KEY}`;
+    recaptchaScript.async = true;
+    recaptchaScript.defer = true;
+    document.body.appendChild(recaptchaScript);
+
+    return () => {
+      if (document.body.contains(recaptchaScript)) {
+        document.body.removeChild(recaptchaScript);
+      }
+    };
+  }, []);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
 
     try {
-      
+      let recaptchaToken = null;
+
+      // Try to get reCAPTCHA v3 token, but don't block if it fails
+      try {
+        if (window.grecaptcha) {
+          recaptchaToken = await window.grecaptcha.execute(
+            RECAPTCHA_SITE_KEY,
+            { action: "login" }
+          );
+          console.log("reCAPTCHA token obtained successfully");
+        } else {
+          console.warn("reCAPTCHA not loaded yet");
+        }
+      } catch (recaptchaError) {
+        console.warn("reCAPTCHA error (non-blocking):", recaptchaError);
+        // Continue without token - backend will handle this
+      }
+
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
       const response = await fetch(`${apiUrl}/api/login`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email,
+          password,
+          recaptchaToken,
+        }),
       });
 
       const data = await response.json();

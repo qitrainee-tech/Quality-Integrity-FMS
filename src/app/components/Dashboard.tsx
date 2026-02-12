@@ -511,7 +511,6 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
               <option>CAR</option>
               <option>DCN</option>
               <option>IQA</option>
-              <option>Audits</option>
             </select>
             {uploadErrors.category && <p className="text-xs text-red-600 mt-1">{uploadErrors.category}</p>}
           </div>
