@@ -33,13 +33,21 @@ export default function App() {
     localStorage.setItem("user", JSON.stringify(userData));
   };
 
+  const handleUserUpdate = (updatedUserData: Partial<User>) => {
+    if (user) {
+      const updatedUser = { ...user, ...updatedUserData };
+      setUser(updatedUser);
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+    }
+  };
+
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem("user");
   };
 
   if (user) {
-    return <Dashboard user={user} onLogout={handleLogout} />;
+    return <Dashboard user={user} onLogout={handleLogout} onUserUpdate={handleUserUpdate} />;
   }
 
   return <Login onLogin={handleLogin} />;

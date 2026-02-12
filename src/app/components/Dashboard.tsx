@@ -5,7 +5,6 @@ import {
   LayoutDashboard, 
   FilePlus, 
   FolderOpen, 
-  Settings, 
   LogOut, 
   Activity, 
   Search,
@@ -39,6 +38,7 @@ import { User } from '../App';
 interface DashboardProps {
   user: User;
   onLogout: () => void;
+  onUserUpdate: (updatedUserData: Partial<User>) => void;
 }
 
 const mockChartData = [
@@ -77,8 +77,8 @@ const getFileIcon = (type: string) => {
   }
 };
 
-export function Dashboard({ user, onLogout }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<'overview' | 'upload' | 'files' | 'users'>('overview');
+export function Dashboard({ user, onLogout, onUserUpdate }: DashboardProps) {
+  const [activeTab, setActiveTab] = useState<'overview' | 'upload' | 'files' | 'users' | 'profile'>('overview');
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const isAdmin = !!(user && user.role && user.role.toString().toLowerCase() === 'admin');
@@ -128,6 +128,19 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
   ]);
   const [trendsPeriod, setTrendsPeriod] = useState<7 | 30>(7);
 
+  // Profile state
+  const [profilePicture, setProfilePicture] = useState<string | null>(null);
+  const [tempProfilePicture, setTempProfilePicture] = useState<string | null>(null);
+  const [pendingProfilePictureFile, setPendingProfilePictureFile] = useState<File | null>(null);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileFormData, setProfileFormData] = useState({
+    name: user.name,
+    email: user.email || '',
+    password: '',
+    confirmPassword: ''
+  });
+  const profileFileInputRef = useRef<HTMLInputElement>(null);
+
   const formatBytes = (bytes: number) => {
     if (!bytes || bytes === 0) return '0 B';
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -173,10 +186,105 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     }
   };
 
+  const fetchProfile = async () => {
+    try {
+      const res = await fetch(`${apiUrl}/api/users/${user.id}/profile`);
+      const data = await res.json();
+      if (data.success && data.user.profilePicture) {
+        setProfilePicture(`data:image/jpeg;base64,${data.user.profilePicture}`);
+      }
+    } catch (err) {
+      console.error('Fetch profile error:', err);
+    }
+  };
+
+  const handleProfileUpdate = async () => {
+    if (profileFormData.password !== profileFormData.confirmPassword) {
+      setNotification({ type: 'error', message: 'Passwords do not match' });
+      return;
+    }
+
+    try {
+      const updateData: any = {
+        name: profileFormData.name,
+        email: profileFormData.email
+      };
+      if (profileFormData.password) {
+        updateData.password = profileFormData.password;
+      }
+
+      const res = await fetch(`${apiUrl}/api/users/${user.id}/profile`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updateData)
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        setNotification({ type: 'success', message: 'Profile updated successfully' });
+        setEditingProfile(false);
+        // Update parent component's user state
+        onUserUpdate({
+          name: profileFormData.name,
+          email: profileFormData.email
+        });
+      } else {
+        setNotification({ type: 'error', message: data.message });
+      }
+    } catch (err) {
+      setNotification({ type: 'error', message: 'Failed to update profile' });
+      console.error('Update profile error:', err);
+    }
+  };
+
+  const handleProfilePictureSelect = (file: File) => {
+    // Just preview the file, don't save yet
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      if (e.target?.result) {
+        setTempProfilePicture(e.target.result as string);
+        setPendingProfilePictureFile(file);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const saveProfilePicture = async () => {
+    if (!pendingProfilePictureFile) {
+      setNotification({ type: 'error', message: 'No picture selected' });
+      return;
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append('profilePicture', pendingProfilePictureFile);
+
+      const res = await fetch(`${apiUrl}/api/users/${user.id}/profile/picture`, {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        // Update the actual profile picture after successful save
+        setProfilePicture(tempProfilePicture);
+        setTempProfilePicture(null);
+        setPendingProfilePictureFile(null);
+        setNotification({ type: 'success', message: 'Profile picture updated' });
+      } else {
+        setNotification({ type: 'error', message: data.message });
+      }
+    } catch (err) {
+      setNotification({ type: 'error', message: 'Failed to upload picture' });
+      console.error('Upload profile picture error:', err);
+    }
+  };
+
   useEffect(() => {
     // fetch on mount and when activeTab is overview
     fetchDashboardStats();
     fetchUploadTrends(7);
+    fetchProfile();
   }, [user.id]);
 
   useEffect(() => {
@@ -756,7 +864,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                     </div>
                     <div>
                       <p className="font-medium text-gray-900">{doc.document_name}</p>
-                      <p className="text-xs text-gray-500">ID: {doc.id}</p>
+                      
                     </div>
                   </div>
                 </td>
@@ -1147,17 +1255,6 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                   </div>
                 )}
               </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-gray-700">Status</label>
-                <select 
-                  value={newUser.status}
-                  onChange={e => setNewUser({...newUser, status: e.target.value as 'Active' | 'Offline' | 'Inactive'})}
-                  className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
-                >
-                  <option value="Active">Active</option>
-                  <option value="Inactive">Inactive</option>
-                </select>
-              </div>
               <div className="pt-4 flex gap-3">
                 <button 
                   type="button"
@@ -1286,6 +1383,163 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
     </motion.div>
   );
 
+  const renderProfile = () => (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+      className="max-w-2xl"
+    >
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <h3 className="text-xl font-semibold text-gray-900 mb-6">My Profile</h3>
+        
+        {!editingProfile ? (
+          <>
+            {/* Profile Picture Display */}
+            <div className="flex items-center gap-6 mb-8 pb-8 border-b border-gray-100">
+              <div className="relative">
+                <div className="w-24 h-24 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold text-2xl overflow-hidden">
+                  {tempProfilePicture ? (
+                    <img src={tempProfilePicture} alt="Preview" className="w-full h-full object-cover" />
+                  ) : profilePicture ? (
+                    <img src={profilePicture} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    user.name.split(' ').map(n => n[0]).join('')
+                  )}
+                </div>
+                <button 
+                  onClick={() => profileFileInputRef.current?.click()}
+                  className="absolute bottom-0 right-0 bg-green-600 hover:bg-green-700 text-white p-2 rounded-full shadow-lg"
+                >
+                  <FilePlus className="w-4 h-4" />
+                </button>
+              </div>
+              <input 
+                ref={profileFileInputRef}
+                type="file" 
+                accept="image/*"
+                hidden
+                onChange={(e) => e.target.files?.[0] && handleProfilePictureSelect(e.target.files[0])}
+              />
+              <div className="flex-1">
+                <p className="text-sm text-gray-600">Profile Picture</p>
+                <p className="text-xs text-gray-500 mt-1">Click the icon to upload a new picture</p>
+                {tempProfilePicture && (
+                  <div className="flex gap-2 mt-3">
+                    <button 
+                      onClick={saveProfilePicture}
+                      className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded font-medium transition-colors"
+                    >
+                      Save
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setTempProfilePicture(null);
+                        setPendingProfilePictureFile(null);
+                      }}
+                      className="px-3 py-1 border border-gray-200 text-gray-700 text-xs rounded font-medium hover:bg-gray-50 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Profile Information */}
+            <div className="grid gap-6 mb-8">
+              <div>
+                <label className="text-sm font-medium text-gray-700">Name</label>
+                <p className="mt-2 text-gray-900 font-medium">{user.name}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Email</label>
+                <p className="mt-2 text-gray-900">{user.email}</p>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Department</label>
+                <p className="mt-2 text-gray-900">{user.department}</p>
+              </div>
+            </div>
+
+            <button 
+              onClick={() => {
+                setEditingProfile(true);
+                setProfileFormData({
+                  name: user.name,
+                  email: user.email || '',
+                  password: '',
+                  confirmPassword: ''
+                });
+              }}
+              className="px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+            >
+              Edit Profile
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Edit Form */}
+            <div className="space-y-6">
+              <div>
+                <label className="text-sm font-medium text-gray-700">Name</label>
+                <input 
+                  type="text"
+                  value={profileFormData.name}
+                  onChange={(e) => setProfileFormData({...profileFormData, name: e.target.value})}
+                  className="mt-2 w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Email</label>
+                <input 
+                  type="email"
+                  value={profileFormData.email}
+                  onChange={(e) => setProfileFormData({...profileFormData, email: e.target.value})}
+                  className="mt-2 w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">New Password (optional)</label>
+                <input 
+                  type="password"
+                  value={profileFormData.password}
+                  onChange={(e) => setProfileFormData({...profileFormData, password: e.target.value})}
+                  className="mt-2 w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-gray-700">Confirm Password</label>
+                <input 
+                  type="password"
+                  value={profileFormData.confirmPassword}
+                  onChange={(e) => setProfileFormData({...profileFormData, confirmPassword: e.target.value})}
+                  className="mt-2 w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none"
+                />
+              </div>
+              <p className="text-xs text-gray-500">Your department cannot be changed.</p>
+            </div>
+
+            <div className="flex gap-3 mt-8">
+              <button 
+                onClick={handleProfileUpdate}
+                className="flex-1 px-6 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+              >
+                Save Changes
+              </button>
+              <button 
+                onClick={() => setEditingProfile(false)}
+                className="flex-1 px-6 py-2 border border-gray-200 text-gray-700 rounded-lg font-medium hover:bg-gray-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </motion.div>
+  );
+
   return (
     <div className="min-h-screen bg-gray-50 flex">
       {/* Sidebar */}
@@ -1347,24 +1601,56 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
                 </div>
               </>
             )}
-
-            <p className="px-4 text-xs font-semibold text-gray-400 uppercase tracking-wider mt-8 mb-2">System</p>
-            <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-all">
-              <Settings className="w-5 h-5 text-gray-400" />
-              Settings
-            </button>
           </div>
 
           <div className="p-4 border-t border-gray-100">
-            <div className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 mb-3">
-              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold">
-                {user.name.split(' ').map(n => n[0]).join('')}
+            <button 
+              onClick={() => {
+                setActiveTab('profile');
+                setIsSidebarOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 p-3 rounded-xl mb-3 transition-all ${
+                activeTab === 'profile' 
+                  ? 'bg-green-50' 
+                  : 'bg-gray-50 hover:bg-gray-100'
+              }`}
+            >
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold overflow-hidden">
+                {tempProfilePicture ? (
+                  <img src={tempProfilePicture} alt="Preview" className="w-full h-full object-cover" />
+                ) : profilePicture ? (
+                  <img src={profilePicture} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  user.name.split(' ').map(n => n[0]).join('')
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold text-gray-900 truncate">{user.name}</p>
-                <p className="text-xs text-gray-500 truncate">{user.role}</p>
+                <p className={`text-xs truncate ${isAdmin ? 'text-gray-500' : 'text-gray-600'}`}>
+                  {isAdmin ? 'Admin' : user.department}
+                </p>
               </div>
-            </div>
+            </button>
+
+            {tempProfilePicture && (
+              <div className="flex gap-2 mb-3">
+                <button 
+                  onClick={saveProfilePicture}
+                  className="flex-1 px-2 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded font-medium transition-colors"
+                >
+                  Save
+                </button>
+                <button 
+                  onClick={() => {
+                    setTempProfilePicture(null);
+                    setPendingProfilePictureFile(null);
+                  }}
+                  className="flex-1 px-2 py-1 border border-gray-200 text-gray-700 text-xs rounded font-medium hover:bg-gray-100 transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
             <button 
               onClick={onLogout}
               className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg transition-colors"
@@ -1396,7 +1682,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
               <Menu className="w-6 h-6" />
             </button>
             <h2 className="text-lg font-semibold text-gray-800 capitalize">
-              {activeTab === 'overview' ? 'System Overview' : activeTab === 'upload' ? 'Upload Center' : activeTab === 'files' ? 'Digital Archive' : 'Account Management'}
+              {activeTab === 'overview' ? 'System Overview' : activeTab === 'upload' ? 'Upload Center' : activeTab === 'files' ? 'Digital Archive' : activeTab === 'profile' ? 'My Profile' : 'Account Management'}
             </h2>
           </div>
           <div className="flex items-center gap-4">
@@ -1430,6 +1716,7 @@ export function Dashboard({ user, onLogout }: DashboardProps) {
           {activeTab === 'upload' && renderAddFile()}
           {activeTab === 'files' && renderFileManager()}
           {activeTab === 'users' && renderUserManagement()}
+          {activeTab === 'profile' && renderProfile()}
         </div>
       </main>
     </div>

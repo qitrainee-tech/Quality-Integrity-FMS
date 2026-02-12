@@ -481,6 +481,147 @@ app.delete('/api/users/:userId', async (req, res) => {
   }
 });
 
+// Get User Profile Route
+app.get('/api/users/:userId/profile', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User ID required' });
+    }
+
+    const connection = await pool.getConnection();
+
+    // Get user info
+    const [userRows] = await connection.query(
+      'SELECT id, email, name, role, department FROM users WHERE id = ?',
+      [userId]
+    );
+
+    // Get profile picture if exists
+    let profilePicture = null;
+    if (userRows.length > 0) {
+      const [profileRows] = await connection.query(
+        'SELECT profile_picture, picture_type FROM user_profiles WHERE user_id = ?',
+        [userId]
+      );
+      if (profileRows.length > 0 && profileRows[0].profile_picture) {
+        // Convert buffer to base64
+        profilePicture = profileRows[0].profile_picture.toString('base64');
+      }
+    }
+
+    connection.release();
+
+    if (userRows.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    const user = userRows[0];
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        department: user.department,
+        profilePicture
+      }
+    });
+  } catch (error) {
+    console.error('Get Profile Error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Update User Profile Route (user can update own profile)
+app.put('/api/users/:userId/profile', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { name, email, password } = req.body;
+
+    if (!userId) {
+      return res.status(400).json({ success: false, message: 'User ID required' });
+    }
+
+    const connection = await pool.getConnection();
+
+    // Build update dynamically (no department update allowed)
+    const fields = [];
+    const params = [];
+    if (name) { fields.push('name = ?'); params.push(name); }
+    if (email) { fields.push('email = ?'); params.push(email); }
+    if (password) {
+      const hashed = await bcrypt.hash(password, 10);
+      fields.push('password = ?'); params.push(hashed);
+    }
+
+    if (fields.length === 0) {
+      connection.release();
+      return res.status(400).json({ success: false, message: 'No fields to update' });
+    }
+
+    params.push(userId);
+    const sql = `UPDATE users SET ${fields.join(', ')} WHERE id = ?`;
+    const [result] = await connection.query(sql, params);
+
+    connection.release();
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    res.json({ success: true, message: 'Profile updated successfully' });
+  } catch (error) {
+    console.error('Update Profile Error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Upload Profile Picture Route
+app.post('/api/users/:userId/profile/picture', upload.single('profilePicture'), async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!userId || !req.file) {
+      return res.status(400).json({ success: false, message: 'User ID and file required' });
+    }
+
+    const connection = await pool.getConnection();
+
+    // Check if profile record exists
+    const [existingProfile] = await connection.query(
+      'SELECT id FROM user_profiles WHERE user_id = ?',
+      [userId]
+    );
+
+    if (existingProfile.length > 0) {
+      // Update existing
+      await connection.query(
+        'UPDATE user_profiles SET profile_picture = ?, picture_type = ? WHERE user_id = ?',
+        [req.file.buffer, req.file.mimetype, userId]
+      );
+    } else {
+      // Insert new
+      await connection.query(
+        'INSERT INTO user_profiles (user_id, profile_picture, picture_type) VALUES (?, ?, ?)',
+        [userId, req.file.buffer, req.file.mimetype]
+      );
+    }
+
+    connection.release();
+
+    res.json({ 
+      success: true, 
+      message: 'Profile picture uploaded successfully'
+    });
+  } catch (error) {
+    console.error('Upload Profile Picture Error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // Document upload route (multiple files in one row)
 app.post('/api/documents/upload', upload.array('document'), async (req, res) => {
   try {
