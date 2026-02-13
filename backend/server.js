@@ -6,16 +6,55 @@ import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import multer from 'multer';
 import archiver from 'archiver';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Hardcoded reCAPTCHA Secret Key (for development)
+// Mailer: initialize transporter once to avoid creating test account per request
+let mailTransporter = null;
+let mailerReady = (async () => {
+  try {
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = process.env.SMTP_PORT;
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+
+    if (smtpHost && smtpPort && smtpUser && smtpPass) {
+      const transportConfig = {
+        host: smtpHost,
+        port: parseInt(smtpPort),
+        secure: parseInt(smtpPort) === 465, // true for 465, false for other ports (587 uses STARTTLS)
+        auth: { user: smtpUser, pass: smtpPass }
+      };
+      
+      // Add TLS options for Gmail compatibility
+      if (smtpHost.includes('gmail')) {
+        transportConfig.tls = { rejectUnauthorized: false };
+      }
+      
+      mailTransporter = nodemailer.createTransport(transportConfig);
+      console.log(`Mailer: using SMTP from environment (${smtpHost}:${smtpPort})`);
+    } else {
+      // create an ethereal test account once
+      const testAccount = await nodemailer.createTestAccount();
+      mailTransporter = nodemailer.createTransport({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        auth: { user: testAccount.user, pass: testAccount.pass }
+      });
+      console.log('Mailer: using Ethereal test account (preview URLs will be logged)');
+    }
+  } catch (err) {
+    console.error('Mailer initialization error:', err);
+    mailTransporter = null;
+  }
+})();
+
 const RECAPTCHA_SECRET_KEY = '6LcjmmgsAAAAAPoAIAUdWF4biXjW1sjm7cinWODo';
 
-// Middleware
 app.use(cors());
 app.use(bodyParser.json());
 
@@ -23,7 +62,7 @@ app.use(bodyParser.json());
 const storage = multer.memoryStorage();
 const upload = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } }); // 200MB limit
 
-// MySQL Connection Pool
+// MySQL Connection 
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
@@ -43,6 +82,50 @@ pool.getConnection()
 app.get('/api/health', (req, res) => {
   res.json({ status: 'Server is running' });
 });
+
+// Email helper
+async function sendWelcomeEmail(toEmail, plainPassword, userName) {
+  try {
+    await mailerReady;
+    if (!mailTransporter) {
+      console.warn('sendWelcomeEmail: mail transporter not available');
+      return false;
+    }
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const subject = `Your PJG Hospital account credentials`;
+    const text = `Hello ${userName || ''},\n\n` +
+      `An account has been created for you on the PJG Hospital QIFMS system.\n\n` +
+      `Email: ${toEmail}\n` +
+      `Password: ${plainPassword}\n\n` +
+      `You can sign in here: ${frontendUrl}\n\n` +
+      `Please change your password after your first login.`;
+
+    const html = `<p>Hello ${userName || ''},</p>
+      <p>An account has been created for you on the <strong>PJG Hospital QIFMS</strong> system.</p>
+      <p><strong>Email:</strong> ${toEmail}<br/><strong>Password:</strong> ${plainPassword}</p>
+      <p>You can sign in here: <a href="${frontendUrl}">${frontendUrl}</a></p>
+      <p>Please change your password after your first login.</p>`;
+
+    const info = await mailTransporter.sendMail({
+      from: process.env.EMAIL_FROM || 'no-reply@pjg.local',
+      to: toEmail,
+      subject,
+      text,
+      html
+    });
+
+    if (nodemailer.getTestMessageUrl) {
+      const preview = nodemailer.getTestMessageUrl(info);
+      if (preview) console.log('Preview email URL:', preview);
+    }
+
+    return true;
+  } catch (err) {
+    console.error('Error sending welcome email:', err);
+    return false;
+  }
+}
 
 // Login Route
 app.post('/api/login', async (req, res) => {
@@ -276,6 +359,11 @@ app.post('/api/create-user', async (req, res) => {
 
     connection.release();
 
+    // Queue welcome email in background (do not block response)
+    sendWelcomeEmail(email, plainPassword, name)
+      .then(ok => console.log('sendWelcomeEmail result:', ok))
+      .catch(err => console.error('sendWelcomeEmail error:', err));
+
     res.status(201).json({ 
       success: true, 
       message: 'User created successfully',
@@ -287,7 +375,8 @@ app.post('/api/create-user', async (req, res) => {
         department: newDepartment,
         status: newStatus,
         tempPassword: password ? null : plainPassword
-      }
+      },
+      emailQueued: true
     });
 
   } catch (error) {

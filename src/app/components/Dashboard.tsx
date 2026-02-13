@@ -408,7 +408,7 @@ export function Dashboard({ user, onLogout, onUserUpdate }: DashboardProps) {
       }
     } catch (err) {
       console.error('Create user error:', err);
-      setNotification({ type: 'error', message: 'Unable to create user. See console for details.' });
+      setNotification({ type: 'error', message: 'Unable to create user' });
     }
   };
 
