@@ -55,6 +55,12 @@ let mailerReady = (async () => {
 
 const RECAPTCHA_SECRET_KEY = '6LcjmmgsAAAAAPoAIAUdWF4biXjW1sjm7cinWODo';
 
+// Log startup configuration
+console.log('Starting server with configuration:');
+console.log('  PORT:', process.env.PORT || '3001');
+console.log('  DB_HOST:', process.env.DB_HOST ? 'set' : 'using fallback');
+console.log('  DB_NAME:', process.env.DB_NAME ? 'set' : 'using fallback');
+
 app.use(cors());
 app.use(bodyParser.json());
 
@@ -116,7 +122,7 @@ async function sendWelcomeEmail(toEmail, plainPassword, userName) {
       return false;
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://quality-integrity-fms.vercel.app/';
     const subject = `Your PJG Hospital account credentials`;
     const text = `Hello ${userName || ''},\n\n` +
       `An account has been created for you on the PJG Hospital QIFMS system.\n\n` +
@@ -1358,6 +1364,15 @@ app.get('/api/upload-trends', async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`✓ Server running on port ${PORT}`);
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, closing server...');
+  server.close(() => {
+    console.log('Server closed');
+    process.exit(0);
+  });
 });
