@@ -82,9 +82,7 @@ if (process.env.MYSQL_URL) {
       database: url.pathname.substring(1), // remove leading /
       waitForConnections: true,
       connectionLimit: 10,
-      queueLimit: 0,
-      enableKeepAlive: true,
-      keepAliveInitialDelayMs: 0
+      queueLimit: 0
     };
     console.log(`Using MYSQL_URL for database connection - Host: ${poolConfig.host}:${poolConfig.port}, DB: ${poolConfig.database}`);
   } catch (err) {
