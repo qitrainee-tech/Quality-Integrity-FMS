@@ -53,7 +53,7 @@ let mailerReady = (async () => {
   }
 })();
 
-const RECAPTCHA_SECRET_KEY = '6LcjmmgsAAAAAPoAIAUdWF4biXjW1sjm7cinWODo';
+
 
 // Log startup configuration
 console.log('Starting server with configuration:');
@@ -72,13 +72,34 @@ const upload = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } }); // 
 let poolConfig;
 if (process.env.MYSQL_URL) {
   // Parse Railway's MySQL URL format: mysql://user:password@host:port/database
-  poolConfig = {
-    uri: process.env.MYSQL_URL,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-  };
-  console.log('Using MYSQL_URL for database connection (Railway internal)');
+  try {
+    const url = new URL(process.env.MYSQL_URL);
+    poolConfig = {
+      host: url.hostname,
+      port: url.port || 3306,
+      user: url.username,
+      password: url.password,
+      database: url.pathname.substring(1), // remove leading /
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      enableKeepAlive: true,
+      keepAliveInitialDelayMs: 0
+    };
+    console.log(`Using MYSQL_URL for database connection - Host: ${poolConfig.host}:${poolConfig.port}, DB: ${poolConfig.database}`);
+  } catch (err) {
+    console.error('Failed to parse MYSQL_URL:', err.message);
+    console.error('Falling back to individual environment variables');
+    poolConfig = {
+      host: process.env.DB_HOST || 'maglev.proxy.rlwy.net',
+      user: process.env.DB_USER || 'root',
+      password: process.env.DB_PASSWORD || 'fKmxaGSGhxRdYQSavvMQaItecXOPVgRV',
+      database: process.env.DB_NAME || 'railway',
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0
+    };
+  }
 } else {
   // Fallback to individual environment variables
   poolConfig = {
@@ -198,7 +219,7 @@ async function sendDocumentNotificationEmail(toEmail, docMeta) {
       return false;
     }
 
-    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    const frontendUrl = process.env.FRONTEND_URL || 'https://quality-integrity-fms.vercel.app/';
     const subject = `New document uploaded: ${docMeta.document_name || 'Document'}`;
     const text = `A new document has been uploaded.
 
