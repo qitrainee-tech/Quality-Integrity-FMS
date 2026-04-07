@@ -283,13 +283,9 @@ app.post('/api/login', async (req, res) => {
       });
     }
 
-    // Verify reCAPTCHA token if provided
     if (recaptchaToken) {
       try {
         const verificationUrl = 'https://www.google.com/recaptcha/api/siteverify';
-
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
         const recaptchaResponse = await fetch(verificationUrl, {
           method: 'POST',
@@ -297,7 +293,7 @@ app.post('/api/login', async (req, res) => {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
           body: new URLSearchParams({
-            secret: RECAPTCHA_SECRET_KEY,
+            secret: process.env.RECAPTCHA_SECRET_KEY,
             response: recaptchaToken,
           }),
           signal: controller.signal

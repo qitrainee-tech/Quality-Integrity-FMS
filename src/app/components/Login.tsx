@@ -16,8 +16,7 @@ interface LoginProps {
   onLogin: (userData: any) => void;
 }
 
-// Hardcoded reCAPTCHA Site Key (for development)
-const RECAPTCHA_SITE_KEY = '6LcjmmgsAAAAADYmpP8sDPF9rc3TwAwSBNfWyy44';
+const RECAPTCHA_SITE_KEY = '6LdhsGgsAAAAAGTmQxwy19FPwkqxBXlXg_XLHVK4';
 
 declare global {
   interface Window {
@@ -56,20 +55,21 @@ export function Login({ onLogin }: LoginProps) {
     try {
       let recaptchaToken = null;
 
-      // Try to get reCAPTCHA v3 token, but don't block if it fails
       try {
         if (window.grecaptcha) {
+          await window.grecaptcha.ready();
+
           recaptchaToken = await window.grecaptcha.execute(
             RECAPTCHA_SITE_KEY,
             { action: "login" }
           );
-          console.log("reCAPTCHA token obtained successfully");
+
+          console.log("reCAPTCHA token obtained:", recaptchaToken);
         } else {
           console.warn("reCAPTCHA not loaded yet");
         }
       } catch (recaptchaError) {
         console.warn("reCAPTCHA error (non-blocking):", recaptchaError);
-        // Continue without token - backend will handle this
       }
 
       const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
