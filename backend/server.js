@@ -157,6 +157,10 @@ let dbReady = false;
 })();
 
 // Routes
+app.get('/', (req, res) => {
+  res.json({ message: 'QIFMS API Server', status: 'running' });
+});
+
 app.get('/api/health', (req, res) => {
   if (!dbReady) {
     return res.status(503).json({ status: 'Server starting, database not ready yet' });
@@ -1412,6 +1416,20 @@ app.get('/api/upload-trends', async (req, res) => {
     console.error('Upload trends error:', err);
     res.status(500).json({ success: false, message: 'Unable to fetch upload trends' });
   }
+});
+
+// Global error handler middleware
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    message: err.message || 'Internal server error'
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: 'API route not found' });
 });
 
 // Start server only after database is ready
