@@ -77,7 +77,7 @@ app.use(bodyParser.json());
 const storage = multer.memoryStorage();
 const upload = multer({ storage, limits: { fileSize: 200 * 1024 * 1024 } }); // 200MB limit
 
-// MySQL Connection - Use MYSQL_URL if available (Railway), otherwise use individual env vars
+// MySQL Connection - Use MYSQL_URL if available (Railway), otherwise use environment variables
 let poolConfig;
 if (process.env.MYSQL_URL) {
   // Parse Railway's MySQL URL format: mysql://user:password@host:port/database
@@ -96,29 +96,28 @@ if (process.env.MYSQL_URL) {
     console.log(`Using MYSQL_URL for database connection - Host: ${poolConfig.host}:${poolConfig.port}, DB: ${poolConfig.database}`);
   } catch (err) {
     console.error('Failed to parse MYSQL_URL:', err.message);
-    console.error('Falling back to individual environment variables');
-    poolConfig = {
-      host: process.env.DB_HOST || 'maglev.proxy.rlwy.net',
-      user: process.env.DB_USER || 'root',
-      password: process.env.DB_PASSWORD || 'fKmxaGSGhxRdYQSavvMQaItecXOPVgRV',
-      database: process.env.DB_NAME || 'railway',
-      waitForConnections: true,
-      connectionLimit: 10,
-      queueLimit: 0
-    };
+    console.error('FATAL: Cannot connect to database without valid MYSQL_URL or environment variables');
+    console.error('Required environment variables: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
+    process.exit(1);
   }
 } else {
-  // Fallback to individual environment variables
+  // Fallback to individual environment variables (must be set)
+  if (!process.env.DB_HOST || !process.env.DB_USER || !process.env.DB_PASSWORD || !process.env.DB_NAME) {
+    console.error('FATAL: Missing required environment variables');
+    console.error('Required: DB_HOST, DB_USER, DB_PASSWORD, DB_NAME');
+    process.exit(1);
+  }
+
   poolConfig = {
-    host: process.env.DB_HOST || 'maglev.proxy.rlwy.net',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || 'fKmxaGSGhxRdYQSavvMQaItecXOPVgRV',
-    database: process.env.DB_NAME || 'railway',
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0
   };
-  console.log('Using individual DB environment variables');
+  console.log('Using environment variables for database connection');
 }
 
 const pool = mysql.createPool(poolConfig);
