@@ -62,25 +62,24 @@ console.log('  DB_HOST:', process.env.DB_HOST ? 'set' : 'using fallback');
 console.log('  DB_NAME:', process.env.DB_NAME ? 'set' : 'using fallback');
 
 // CORS configuration for cross-origin requests (Vercel frontend → Railway backend)
-app.use(cors({
-  origin: function(origin, callback) {
-    const allowedOrigins = [
-      'https://quality-integrity-fms.vercel.app',
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:3001'
-    ];
-
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+const corsOptions = {
+  origin: [
+    'https://quality-integrity-fms.vercel.app',
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:3001'
+  ],
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  optionsSuccessStatus: 200
+};
+
+app.use(cors(corsOptions));
+
+// Explicit OPTIONS handler for preflight requests
+app.options('*', cors(corsOptions));
+
 app.use(bodyParser.json());
 
 // Multer (memory storage) for file uploads (store in DB as BLOB)
