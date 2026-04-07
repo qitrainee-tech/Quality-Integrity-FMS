@@ -13,6 +13,9 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+console.log('Railway PORT env var:', process.env.PORT);
+console.log('Using PORT:', PORT);
+
 // Mailer: initialize transporter once to avoid creating test account per request
 let mailTransporter = null;
 let mailerReady = (async () => {
@@ -285,6 +288,10 @@ app.post('/api/login', async (req, res) => {
     if (recaptchaToken) {
       try {
         const verificationUrl = 'https://www.google.com/recaptcha/api/siteverify';
+
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
         const recaptchaResponse = await fetch(verificationUrl, {
           method: 'POST',
           headers: {
@@ -294,27 +301,27 @@ app.post('/api/login', async (req, res) => {
             secret: RECAPTCHA_SECRET_KEY,
             response: recaptchaToken,
           }),
+          signal: controller.signal
         });
 
+        clearTimeout(timeout);
         const recaptchaData = await recaptchaResponse.json();
         console.log('reCAPTCHA response:', recaptchaData);
 
         // Check reCAPTCHA score and success - BLOCK login if failed
         if (!recaptchaData.success || recaptchaData.score < 0.5) {
           console.warn('❌ reCAPTCHA verification failed. Success:', recaptchaData.success, 'Score:', recaptchaData.score);
-          return res.status(400).json({ 
-            success: false, 
-            message: 'reCAPTCHA verification failed. Please try again.' 
+          return res.status(400).json({
+            success: false,
+            message: 'reCAPTCHA verification failed. Please try again.'
           });
         } else {
           console.log('✓ reCAPTCHA verified successfully, score:', recaptchaData.score);
         }
       } catch (recaptchaErr) {
-        console.error('reCAPTCHA verification error:', recaptchaErr);
-        return res.status(500).json({ 
-          success: false, 
-          message: 'Server error during verification' 
-        });
+        console.error('reCAPTCHA verification error:', recaptchaErr.message);
+        // Don't block login on reCAPTCHA failure - just log it
+        console.warn('⚠ Continuing login despite reCAPTCHA error');
       }
     } else {
       console.warn('⚠ reCAPTCHA token not provided');
