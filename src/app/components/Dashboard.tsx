@@ -1703,13 +1703,13 @@ export function Dashboard({ user, onLogout, onUserUpdate }: DashboardProps) {
                     onChange={e => setEditedUser({...editedUser, department: e.target.value})}
                     className="w-full px-4 py-2 rounded-lg border border-gray-200 focus:ring-2 focus:ring-green-500/20 outline-none bg-white"
                   >
-                    <option>Under MCC</option>
-                    <option>HOPSS</option>
-                    <option>Finance</option>
-                    <option>Medical</option>
-                    <option>Allied</option>
-                    <option>Nursing</option>
-                    <option>Committee</option>
+                    <option value="Under MCC">Under MCC</option>
+                    <option value="HOPSS">HOPSS</option>
+                    <option value="Finance">Finance</option>
+                    <option value="Medical">Medical</option>
+                    <option value="Allied">Allied</option>
+                    <option value="Nursing">Nursing</option>
+                    <option value="Committee">Committee</option>
                   </select>
                 </div>
               </div>

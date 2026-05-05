@@ -240,12 +240,12 @@ export function Login({ onLogin }: LoginProps) {
                   >
                     Password
                   </label>
-                  <a
+                  {/* <a
                     href="#"
                     className="text-sm font-medium text-green-600 hover:text-green-700"
                   >
                     Forgot password?
-                  </a>
+                  </a> */}
                 </div>
                 <div className="relative group">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -305,7 +305,7 @@ export function Login({ onLogin }: LoginProps) {
 
             <div className="mt-12 pt-6 border-t border-gray-100">
               <p className="text-xs text-center text-gray-400">
-                &copy; {new Date().getFullYear()} PJG Hospital.
+                &copy; {new Date().getFullYear()} DR.PJGMRMC.
                 System restricted to authorized personnel.
               </p>
             </div>
