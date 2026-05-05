@@ -695,11 +695,33 @@ app.get('/api/users', async (req, res) => {
       'SELECT id, email, name, role, department, status, created_at FROM users'
     );
 
+    // Fetch profile pictures for all users
+    const usersWithPictures = await Promise.all(
+      users.map(async (user) => {
+        try {
+          const [profileRows] = await connection.query(
+            'SELECT profile_picture, picture_type FROM user_profiles WHERE user_id = ?',
+            [user.id]
+          );
+          let profilePicture = null;
+          let pictureType = 'image/jpeg';
+          if (profileRows.length > 0 && profileRows[0].profile_picture) {
+            profilePicture = profileRows[0].profile_picture.toString('base64');
+            pictureType = profileRows[0].picture_type || 'image/jpeg';
+          }
+          return { ...user, profilePicture, pictureType };
+        } catch (err) {
+          console.error('Error fetching profile picture for user', user.id, ':', err);
+          return { ...user, profilePicture: null, pictureType: 'image/jpeg' };
+        }
+      })
+    );
+
     connection.release();
 
     res.json({ 
       success: true, 
-      users 
+      users: usersWithPictures 
     });
 
   } catch (error) {

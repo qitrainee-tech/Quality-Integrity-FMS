@@ -62,12 +62,12 @@ const mockFiles = [
 ];
 
 const initialUsers = [
-  { id: 2, name: 'Admin', email: 'admin@pjghospital.com', role: 'Admin', department: 'Quality Improvement', status: 'Active' },
-  { id: 4, name: 'Admin', email: 'admin@gmail.com', role: 'User', department: 'General', status: 'Active' },
-  { id: 5, name: 'sample1', email: 'sample1@gmail.com', role: 'User', department: 'General', status: 'Active' },
-  { id: 6, name: 'sample2', email: 'sample2@gmail.com', role: 'User', department: 'General', status: 'Active' },
-  { id: 7, name: 'sample3', email: 'sample3@gmail.com', role: 'User', department: 'General', status: 'Active' },
-  { id: 8, name: 'sample4', email: 'sample4@gmail.com', role: 'User', department: 'General', status: 'Active' },
+  { id: 2, name: 'Admin', email: 'admin@pjghospital.com', role: 'Admin', department: 'Under MCC', status: 'Active' },
+  { id: 4, name: 'Admin', email: 'admin@gmail.com', role: 'User', department: 'Finance', status: 'Active' },
+  { id: 5, name: 'sample1', email: 'sample1@gmail.com', role: 'User', department: 'Under MCC', status: 'Active' },
+  { id: 6, name: 'sample2', email: 'sample2@gmail.com', role: 'User', department: 'Medical', status: 'Active' },
+  { id: 7, name: 'sample3', email: 'sample3@gmail.com', role: 'User', department: 'Nursing', status: 'Active' },
+  { id: 8, name: 'sample4', email: 'sample4@gmail.com', role: 'User', department: 'HOPSS', status: 'Active' },
 ];
 
 const getFileIcon = (type: string) => {
@@ -1430,9 +1430,17 @@ export function Dashboard({ user, onLogout, onUserUpdate }: DashboardProps) {
               <tr key={u.id} className="hover:bg-green-50/30 transition-colors group">
                 <td className="p-4">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold text-xs">
-                      {u.name.split(' ').map(n => n[0]).join('')}
-                    </div>
+                    {u.profilePicture ? (
+                      <img 
+                        src={`data:${u.pictureType || 'image/jpeg'};base64,${u.profilePicture}`} 
+                        alt={u.name}
+                        className="w-8 h-8 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-green-100 flex items-center justify-center text-green-700 font-bold text-xs">
+                        {u.name.split(' ').map(n => n[0]).join('')}
+                      </div>
+                    )}
                     <div>
                       <p className="font-medium text-gray-900">{u.name}</p>
                       <p className="text-xs text-gray-500">{u.email}</p>

@@ -11,6 +11,8 @@ export interface User {
   email: string;
   role: UserRole;
   department?: string;
+  profilePicture?: string;
+  pictureType?: string;
 }
 
 export default function App() {
